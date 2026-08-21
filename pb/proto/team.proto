@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package agenteam.v1;
+
+import "google/api/annotations.proto";
+import "common.proto";
+
+option go_package = "github.com/hwanyan/agenteam/pb/gen/;agenteamv1";
+
+// TeamService 负责团队的创建、查询与删除。
+// 创建团队时会自动创建团队的主 Agent。
+service TeamService {
+  rpc CreateTeam(CreateTeamRequest) returns (CreateTeamResponse) {
+    option (google.api.http) = {
+      post: "/v1/teams"
+      body: "*"
+    };
+  }
+
+  rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse) {
+    option (google.api.http) = {
+      get: "/v1/teams"
+    };
+  }
+
+  rpc GetTeam(GetTeamRequest) returns (GetTeamResponse) {
+    option (google.api.http) = {
+      get: "/v1/teams/{id}"
+    };
+  }
+
+  rpc DeleteTeam(DeleteTeamRequest) returns (DeleteTeamResponse) {
+    option (google.api.http) = {
+      delete: "/v1/teams/{id}"
+    };
+  }
+}
+
+message CreateTeamRequest {
+  string name = 1;
+}
+
+message CreateTeamResponse {
+  Team team = 1;
+  Agent main_agent = 2;
+}
+
+message ListTeamsRequest {}
+
+message ListTeamsResponse {
+  repeated Team teams = 1;
+}
+
+message GetTeamRequest {
+  string id = 1;
+}
+
+message GetTeamResponse {
+  Team team = 1;
+}
+
+message DeleteTeamRequest {
+  string id = 1;
+}
+
+message DeleteTeamResponse {}

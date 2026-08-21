@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package agenteam.v1;
+
+import "google/api/annotations.proto";
+import "common.proto";
+
+option go_package = "github.com/hwanyan/agenteam/pb/gen/;agenteamv1";
+
+// WorkspaceService 负责“工作区”中用户与团队主 Agent 的对话交互。
+service WorkspaceService {
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse) {
+    option (google.api.http) = {
+      post: "/v1/teams/{team_id}/messages"
+      body: "*"
+    };
+  }
+
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse) {
+    option (google.api.http) = {
+      get: "/v1/teams/{team_id}/messages"
+    };
+  }
+}
+
+message SendMessageRequest {
+  string team_id = 1;
+  string content = 2;
+}
+
+message SendMessageResponse {
+  ChatMessage user_message = 1;
+  ChatMessage agent_message = 2;
+}
+
+message ListMessagesRequest {
+  string team_id = 1;
+}
+
+message ListMessagesResponse {
+  repeated ChatMessage messages = 1;
+}

@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package agenteam.v1;
+
+option go_package = "github.com/hwanyan/agenteam/pb/gen/;agenteamv1";
+
+// Agent 运行状态
+enum AgentStatus {
+  AGENT_STATUS_UNSPECIFIED = 0;
+  AGENT_STATUS_LOADED = 1;    // 已加载，可正常使用
+  AGENT_STATUS_RELOADING = 2; // 保存后正在重新加载
+  AGENT_STATUS_ERROR = 3;     // 加载失败
+}
+
+// 消息发送角色
+enum MessageRole {
+  MESSAGE_ROLE_UNSPECIFIED = 0;
+  MESSAGE_ROLE_USER = 1;
+  MESSAGE_ROLE_AGENT = 2;
+  MESSAGE_ROLE_SYSTEM = 3;
+}
+
+// Agent 是团队中的最小执行单元，目前每个团队自动拥有一个主 Agent。
+message Agent {
+  string id = 1;
+  string team_id = 2;
+  string name = 3;
+  string prompt = 4;
+  string model = 5;             // 对应 ModelOption.id
+  repeated string mcp_tools = 6; // 对应 ToolOption.id 列表
+  repeated string skills = 7;    // 对应 SkillOption.id 列表
+  bool is_main = 8;
+  int64 version = 9;             // 每次保存后自增，代表 Runtime 加载的版本
+  AgentStatus status = 10;
+  int64 created_at = 11;
+  int64 updated_at = 12;
+}
+
+// 团队，创建时会自动生成一个主 Agent。
+message Team {
+  string id = 1;
+  string name = 2;
+  string main_agent_id = 3;
+  int64 created_at = 4;
+  int64 updated_at = 5;
+}
+
+// 工作区中的一条聊天消息
+message ChatMessage {
+  string id = 1;
+  string team_id = 2;
+  string agent_id = 3;
+  MessageRole role = 4;
+  string content = 5;
+  int64 created_at = 6;
+}
+
+// 可选的 LLM 模型
+message ModelOption {
+  string id = 1;
+  string name = 2;
+  string provider = 3;
+  string description = 4;
+}
+
+// 可选的 MCP 工具 / Skill，两者结构一致，分别用不同接口返回
+message ToolOption {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+}

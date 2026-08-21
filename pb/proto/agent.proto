@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package agenteam.v1;
+
+import "google/api/annotations.proto";
+import "common.proto";
+
+option go_package = "github.com/hwanyan/agenteam/pb/gen/;agenteamv1";
+
+// AgentService 负责 Agent 的查询、更新（保存并重新加载），
+// 以及可选模型 / MCP 工具 / Skill 选项的查询。
+service AgentService {
+  rpc GetAgent(GetAgentRequest) returns (GetAgentResponse) {
+    option (google.api.http) = {
+      get: "/v1/agents/{id}"
+    };
+  }
+
+  // 保存 Agent 配置并触发服务端重新加载该 Agent。
+  rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse) {
+    option (google.api.http) = {
+      put: "/v1/agents/{id}"
+      body: "*"
+    };
+  }
+
+  // 删除一个非主 Agent；主 Agent（团队创建时自动生成）不可删除，
+  // 只能随 DeleteTeam 一起删除。
+  rpc DeleteAgent(DeleteAgentRequest) returns (DeleteAgentResponse) {
+    option (google.api.http) = {
+      delete: "/v1/agents/{id}"
+    };
+  }
+
+  rpc ListModelOptions(ListModelOptionsRequest) returns (ListModelOptionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/options/models"
+    };
+  }
+
+  rpc ListMcpToolOptions(ListMcpToolOptionsRequest) returns (ListMcpToolOptionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/options/mcp-tools"
+    };
+  }
+
+  rpc ListSkillOptions(ListSkillOptionsRequest) returns (ListSkillOptionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/options/skills"
+    };
+  }
+}
+
+message GetAgentRequest {
+  string id = 1;
+}
+
+message GetAgentResponse {
+  Agent agent = 1;
+}
+
+message UpdateAgentRequest {
+  string id = 1;
+  string name = 2;
+  string prompt = 3;
+  string model = 4;
+  repeated string mcp_tools = 5;
+  repeated string skills = 6;
+}
+
+message UpdateAgentResponse {
+  Agent agent = 1;
+}
+
+message DeleteAgentRequest {
+  string id = 1;
+}
+
+message DeleteAgentResponse {}
+
+message ListModelOptionsRequest {}
+
+message ListModelOptionsResponse {
+  repeated ModelOption models = 1;
+}
+
+message ListMcpToolOptionsRequest {}
+
+message ListMcpToolOptionsResponse {
+  repeated ToolOption tools = 1;
+}
+
+message ListSkillOptionsRequest {}
+
+message ListSkillOptionsResponse {
+  repeated ToolOption skills = 1;
+}

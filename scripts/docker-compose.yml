@@ -1,0 +1,46 @@
+version: "3.8"
+
+# 本地开发用的三种数据库：
+#   - postgres: 关系型，存 teams / agents
+#   - redis:    KV，存 Agent 运行态热缓存
+#   - mongo:    文档型，存 chat_messages（聊天记录）
+#
+# 用法：
+#   docker compose -f scripts/docker-compose.yml up -d
+#   psql "postgres://agenteam:agenteam@localhost:5432/agenteam" -f scripts/postgres/0001_init.sql
+#   mongosh "mongodb://localhost:27017" scripts/mongo/0001_init.js
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agenteam
+      POSTGRES_PASSWORD: agenteam
+      POSTGRES_DB: agenteam
+    ports:
+      - "5432:5432"
+    volumes:
+      - agenteam_pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - agenteam_redis_data:/data
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: agenteam
+    ports:
+      - "27017:27017"
+    volumes:
+      - agenteam_mongo_data:/data/db
+
+volumes:
+  agenteam_pg_data:
+  agenteam_redis_data:
+  agenteam_mongo_data:
