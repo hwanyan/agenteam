@@ -6,7 +6,7 @@
 //
 // 用法：mongosh <uri> scripts/mongo/0001_init.js
 
-db = db.getSiblingDB(process.env.AGENTEAM_MONGO_DATABASE || "agenteam");
+db = db.getSiblingDB(process.env.AGENTEAM_MONGO_DATABASE || "agenteamdb");
 
 db.createCollection("chat_messages");
 

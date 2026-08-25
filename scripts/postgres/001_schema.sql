@@ -8,6 +8,9 @@
 -- 聊天记录（ChatMessage）使用 MongoDB 存储，见 scripts/mongo/。
 -- Agent 运行态热缓存使用 Redis，无需预置 schema。
 
+-- 以 agenteam 身份连接到 agenteamdb 数据库
+\c agenteamdb agenteam;
+
 BEGIN;
 
 CREATE TYPE agent_status AS ENUM (
