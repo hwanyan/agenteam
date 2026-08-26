@@ -158,6 +158,32 @@ func (s *Store) GetAgent(ctx context.Context, id string) (*agenteamv1.Agent, err
 	return scanAgent(row)
 }
 
+// ListAgentsByTeam 返回指定团队下的全部 Agent（含主 Agent），主 Agent 排在最前，
+// 其余按创建时间升序排列。
+func (s *Store) ListAgentsByTeam(ctx context.Context, teamID string) ([]*agenteamv1.Agent, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, team_id, name, prompt, model, mcp_tools, skills, is_main, version, status, created_at, updated_at
+		FROM agents WHERE team_id = $1 ORDER BY is_main DESC, created_at ASC
+	`, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list agents by team: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*agenteamv1.Agent, 0)
+	for rows.Next() {
+		a, err := scanAgent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: iterate agents: %w", err)
+	}
+	return out, nil
+}
+
 func scanAgent(row pgx.Row) (*agenteamv1.Agent, error) {
 	var (
 		a         agenteamv1.Agent

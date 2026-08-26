@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/hwanyan/agenteam/internal/idgen"
 	"github.com/hwanyan/agenteam/internal/options"
 	"github.com/hwanyan/agenteam/internal/store"
 	agenteamv1 "github.com/hwanyan/agenteam/pb/gen"
@@ -30,6 +32,60 @@ func (s *AgentServer) GetAgent(ctx context.Context, req *agenteamv1.GetAgentRequ
 		return nil, agentNotFoundOrErr(err)
 	}
 	return &agenteamv1.GetAgentResponse{Agent: agent}, nil
+}
+
+// ListAgents 返回指定团队下的全部 Agent（含主 Agent）。
+func (s *AgentServer) ListAgents(ctx context.Context, req *agenteamv1.ListAgentsRequest) (*agenteamv1.ListAgentsResponse, error) {
+	if _, err := s.Store.GetTeam(ctx, req.TeamId); err != nil {
+		return nil, teamNotFoundOrErr(err)
+	}
+	agents, err := s.Store.ListAgentsByTeam(ctx, req.TeamId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "查询团队 agent 列表失败: %v", err)
+	}
+	return &agenteamv1.ListAgentsResponse{Agents: agents}, nil
+}
+
+// CreateAgent 在指定团队下创建一个新的非主 Agent，并触发服务端加载。
+func (s *AgentServer) CreateAgent(ctx context.Context, req *agenteamv1.CreateAgentRequest) (*agenteamv1.CreateAgentResponse, error) {
+	if _, err := s.Store.GetTeam(ctx, req.TeamId); err != nil {
+		return nil, teamNotFoundOrErr(err)
+	}
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "agent 名称不能为空")
+	}
+	if req.Prompt == "" {
+		return nil, status.Error(codes.InvalidArgument, "agent prompt 不能为空")
+	}
+
+	model := req.Model
+	if model == "" {
+		model = options.DefaultModel
+	}
+
+	now := time.Now().Unix()
+	agent := &agenteamv1.Agent{
+		Id:        idgen.New("agent"),
+		TeamId:    req.TeamId,
+		Name:      req.Name,
+		Prompt:    req.Prompt,
+		Model:     model,
+		McpTools:  append([]string{}, req.McpTools...),
+		Skills:    append([]string{}, req.Skills...),
+		IsMain:    false,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	agent, err := s.Runtime.Load(ctx, agent)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "加载 agent 失败: %v", err)
+	}
+	if err := s.Store.SaveAgent(ctx, agent); err != nil {
+		return nil, status.Errorf(codes.Internal, "保存 agent 配置失败: %v", err)
+	}
+
+	return &agenteamv1.CreateAgentResponse{Agent: agent}, nil
 }
 
 // UpdateAgent 保存 Agent 配置并触发服务端重新加载。

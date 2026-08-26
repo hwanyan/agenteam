@@ -16,6 +16,21 @@ service AgentService {
     };
   }
 
+  // 返回指定团队下的全部 Agent（含主 Agent），按创建时间升序排列。
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse) {
+    option (google.api.http) = {
+      get: "/v1/teams/{team_id}/agents"
+    };
+  }
+
+  // 在指定团队下创建一个新的非主 Agent，并触发服务端加载。
+  rpc CreateAgent(CreateAgentRequest) returns (CreateAgentResponse) {
+    option (google.api.http) = {
+      post: "/v1/teams/{team_id}/agents"
+      body: "*"
+    };
+  }
+
   // 保存 Agent 配置并触发服务端重新加载该 Agent。
   rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse) {
     option (google.api.http) = {
@@ -56,6 +71,27 @@ message GetAgentRequest {
 }
 
 message GetAgentResponse {
+  Agent agent = 1;
+}
+
+message ListAgentsRequest {
+  string team_id = 1;
+}
+
+message ListAgentsResponse {
+  repeated Agent agents = 1;
+}
+
+message CreateAgentRequest {
+  string team_id = 1;
+  string name = 2;
+  string prompt = 3;
+  string model = 4;
+  repeated string mcp_tools = 5;
+  repeated string skills = 6;
+}
+
+message CreateAgentResponse {
   Agent agent = 1;
 }
 

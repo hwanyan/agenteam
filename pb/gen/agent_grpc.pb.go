@@ -20,6 +20,8 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	AgentService_GetAgent_FullMethodName           = "/agenteam.v1.AgentService/GetAgent"
+	AgentService_ListAgents_FullMethodName         = "/agenteam.v1.AgentService/ListAgents"
+	AgentService_CreateAgent_FullMethodName        = "/agenteam.v1.AgentService/CreateAgent"
 	AgentService_UpdateAgent_FullMethodName        = "/agenteam.v1.AgentService/UpdateAgent"
 	AgentService_DeleteAgent_FullMethodName        = "/agenteam.v1.AgentService/DeleteAgent"
 	AgentService_ListModelOptions_FullMethodName   = "/agenteam.v1.AgentService/ListModelOptions"
@@ -35,6 +37,10 @@ const (
 // 以及可选模型 / MCP 工具 / Skill 选项的查询。
 type AgentServiceClient interface {
 	GetAgent(ctx context.Context, in *GetAgentRequest, opts ...grpc.CallOption) (*GetAgentResponse, error)
+	// 返回指定团队下的全部 Agent（含主 Agent），按创建时间升序排列。
+	ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error)
+	// 在指定团队下创建一个新的非主 Agent，并触发服务端加载。
+	CreateAgent(ctx context.Context, in *CreateAgentRequest, opts ...grpc.CallOption) (*CreateAgentResponse, error)
 	// 保存 Agent 配置并触发服务端重新加载该 Agent。
 	UpdateAgent(ctx context.Context, in *UpdateAgentRequest, opts ...grpc.CallOption) (*UpdateAgentResponse, error)
 	// 删除一个非主 Agent；主 Agent（团队创建时自动生成）不可删除，
@@ -57,6 +63,26 @@ func (c *agentServiceClient) GetAgent(ctx context.Context, in *GetAgentRequest, 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetAgentResponse)
 	err := c.cc.Invoke(ctx, AgentService_GetAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAgentsResponse)
+	err := c.cc.Invoke(ctx, AgentService_ListAgents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) CreateAgent(ctx context.Context, in *CreateAgentRequest, opts ...grpc.CallOption) (*CreateAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateAgentResponse)
+	err := c.cc.Invoke(ctx, AgentService_CreateAgent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +147,10 @@ func (c *agentServiceClient) ListSkillOptions(ctx context.Context, in *ListSkill
 // 以及可选模型 / MCP 工具 / Skill 选项的查询。
 type AgentServiceServer interface {
 	GetAgent(context.Context, *GetAgentRequest) (*GetAgentResponse, error)
+	// 返回指定团队下的全部 Agent（含主 Agent），按创建时间升序排列。
+	ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error)
+	// 在指定团队下创建一个新的非主 Agent，并触发服务端加载。
+	CreateAgent(context.Context, *CreateAgentRequest) (*CreateAgentResponse, error)
 	// 保存 Agent 配置并触发服务端重新加载该 Agent。
 	UpdateAgent(context.Context, *UpdateAgentRequest) (*UpdateAgentResponse, error)
 	// 删除一个非主 Agent；主 Agent（团队创建时自动生成）不可删除，
@@ -141,6 +171,12 @@ type UnimplementedAgentServiceServer struct{}
 
 func (UnimplementedAgentServiceServer) GetAgent(context.Context, *GetAgentRequest) (*GetAgentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetAgent not implemented")
+}
+func (UnimplementedAgentServiceServer) ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAgents not implemented")
+}
+func (UnimplementedAgentServiceServer) CreateAgent(context.Context, *CreateAgentRequest) (*CreateAgentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateAgent not implemented")
 }
 func (UnimplementedAgentServiceServer) UpdateAgent(context.Context, *UpdateAgentRequest) (*UpdateAgentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateAgent not implemented")
@@ -192,6 +228,42 @@ func _AgentService_GetAgent_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServiceServer).GetAgent(ctx, req.(*GetAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_ListAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAgentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ListAgents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ListAgents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ListAgents(ctx, req.(*ListAgentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_CreateAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).CreateAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_CreateAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).CreateAgent(ctx, req.(*CreateAgentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -296,6 +368,14 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAgent",
 			Handler:    _AgentService_GetAgent_Handler,
+		},
+		{
+			MethodName: "ListAgents",
+			Handler:    _AgentService_ListAgents_Handler,
+		},
+		{
+			MethodName: "CreateAgent",
+			Handler:    _AgentService_CreateAgent_Handler,
 		},
 		{
 			MethodName: "UpdateAgent",

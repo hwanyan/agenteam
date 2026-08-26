@@ -38,6 +38,8 @@ type Store interface {
 	SaveAgent(ctx context.Context, agent *pb.Agent) error
 	// GetAgent 按 id 查询 Agent。
 	GetAgent(ctx context.Context, id string) (*pb.Agent, error)
+	// ListAgentsByTeam 返回指定团队下的全部 Agent（含主 Agent），按创建时间升序排列。
+	ListAgentsByTeam(ctx context.Context, teamID string) ([]*pb.Agent, error)
 	// DeleteAgent 删除一个非主 Agent；若目标是主 Agent 则返回 ErrMainAgentProtected。
 	DeleteAgent(ctx context.Context, id string) error
 
@@ -56,6 +58,7 @@ type TeamAgentStore interface {
 	DeleteTeamAndAgents(ctx context.Context, id string) error
 	SaveAgent(ctx context.Context, agent *pb.Agent) error
 	GetAgent(ctx context.Context, id string) (*pb.Agent, error)
+	ListAgentsByTeam(ctx context.Context, teamID string) ([]*pb.Agent, error)
 	DeleteAgent(ctx context.Context, id string) error
 }
 
@@ -108,6 +111,10 @@ func (c *composite) SaveAgent(ctx context.Context, agent *pb.Agent) error {
 
 func (c *composite) GetAgent(ctx context.Context, id string) (*pb.Agent, error) {
 	return c.teams.GetAgent(ctx, id)
+}
+
+func (c *composite) ListAgentsByTeam(ctx context.Context, teamID string) ([]*pb.Agent, error) {
+	return c.teams.ListAgentsByTeam(ctx, teamID)
 }
 
 func (c *composite) DeleteAgent(ctx context.Context, id string) error {
