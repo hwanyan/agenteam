@@ -46,9 +46,13 @@ Store 按数据形态拆分到不同数据库，而非塞进同一种数据库�
   （包含绑定的 MCP 工具 / Skill 说明），调用 LLM 客户端得到回复，并持久化整段对话到 MongoDB。
   另提供流式版本 `SendMessageStream`（HTTP: `POST /v1/teams/{team_id}/messages:stream`），
   以 gRPC server-streaming + grpc-gateway chunked 响应的方式，逐段推送模型的增量输出
-  （底层对接 DeepSeek 官方 SDK 的 `CreateChatCompletionStream`），前端可据此实现打字机效果的
-  流式对话界面；用户消息与最终完整回复仍会分别在流的首尾持久化到 MongoDB，与非流式接口
-  的历史记录保持一致。
+  （底层对接 DeepSeek 官方 SDK 的 `CreateChatCompletionStream`），前端（`agenteam-web`）已接入
+  该接口实现打字机效果的流式对话界面；用户消息与最终完整回复仍会分别在流的首尾持久化到
+  MongoDB，与非流式接口的历史记录保持一致。
+  - **HTTP 网关注册方式说明**：`main.go` 中 Team/Agent 服务通过 grpc-gateway 的 in-process
+    直调（`RegisterXxxHandlerServer`）挂载，无需拨号；但 Workspace 服务因含 server-streaming
+    RPC，in-process 直调模式对流式转发返回 `Unimplemented`（grpc-gateway 已知限制），因此改为
+    真实拨号本地 gRPC 端口（`RegisterWorkspaceServiceHandlerClient`）以支持 HTTP chunked 流式响应。
 
 ## 运行
 

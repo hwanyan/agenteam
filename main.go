@@ -13,9 +13,11 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
 
 	gwruntime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
@@ -99,14 +101,22 @@ func main() {
 
 	ctx := context.Background()
 	mux := gwruntime.NewServeMux()
-	// 直接以进程内调用的方式挂载 handler，无需再拨号连接上面的 gRPC 端口。
+	// Team / Agent 均为一元 RPC，直接以进程内调用的方式挂载 handler，无需拨号。
 	if err := agenteamv1.RegisterTeamServiceHandlerServer(ctx, mux, teamSrv); err != nil {
 		log.Fatalf("register team gateway: %v", err)
 	}
 	if err := agenteamv1.RegisterAgentServiceHandlerServer(ctx, mux, agentSrv); err != nil {
 		log.Fatalf("register agent gateway: %v", err)
 	}
-	if err := agenteamv1.RegisterWorkspaceServiceHandlerServer(ctx, mux, workspaceSrv); err != nil {
+	// Workspace 含 SendMessageStream（server-streaming），grpc-gateway 的
+	// in-process 直调模式（RegisterWorkspaceServiceHandlerServer）不支持流式转发
+	// （见 pb/gen/workspace.pb.gw.go 中对应 handler 会直接返回 Unimplemented），
+	// 因此改为真实拨号连接本地 gRPC 端口，经由 gRPC 客户端转发，以支持 HTTP chunked 流式响应。
+	grpcConn, err := grpc.NewClient(dialTarget(cfg.GRPCAddr), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("dial local grpc for workspace gateway: %v", err)
+	}
+	if err := agenteamv1.RegisterWorkspaceServiceHandlerClient(ctx, mux, agenteamv1.NewWorkspaceServiceClient(grpcConn)); err != nil {
 		log.Fatalf("register workspace gateway: %v", err)
 	}
 
@@ -128,4 +138,14 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// dialTarget 将 gRPC 监听地址转换为可供客户端拨号的目标地址：
+// 若地址形如 ":9090"（仅端口，用于服务端监听所有网卡），客户端拨号时需要
+// 一个明确的 host，这里统一补上 127.0.0.1（网关与 gRPC server 运行在同一进程/主机内）。
+func dialTarget(addr string) string {
+	if strings.HasPrefix(addr, ":") {
+		return "127.0.0.1" + addr
+	}
+	return addr
 }
