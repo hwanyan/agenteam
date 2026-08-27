@@ -71,7 +71,7 @@ func main() {
 	deps := &service.Deps{
 		Store:   st,
 		Runtime: agentruntime.New(agentCache),
-		LLM:     llm.NewFromEnv(),
+		LLM:     llm.New(cfg.DeepSeekAPIKey, cfg.DeepSeekBaseURL),
 	}
 
 	teamSrv := service.NewTeamServer(deps)

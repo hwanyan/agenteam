@@ -4,17 +4,21 @@
 // 对外暴露的 List* 方法签名保持不变即可无缝切换。
 package options
 
-import agenteamv1 "github.com/hwanyan/agenteam/pb/gen"
+import (
+	deepseek "github.com/cohesion-org/deepseek-go"
+
+	agenteamv1 "github.com/hwanyan/agenteam/pb/gen"
+)
 
 // Models 返回当前平台支持的 LLM 模型选项。
-// 模型 id 会作为 Agent.Model 字段的取值，并原样传给 OpenAI 兼容的 Chat Completions 接口。
+//
+// 平台底层统一使用 DeepSeek 官方 Go SDK（github.com/cohesion-org/deepseek-go）对接真实模型服务，
+// 模型 id 直接取自该 SDK 提供的模型常量，原样传给 DeepSeek 的 Chat Completions 接口，
+// 主 Agent 及平台上创建的所有子 Agent 均从下列清单中选择模型。
 func Models() []*agenteamv1.ModelOption {
 	return []*agenteamv1.ModelOption{
-		{Id: "gpt-4o-mini", Name: "GPT-4o mini", Provider: "openai", Description: "轻量、低成本，适合日常对话与工具调用"},
-		{Id: "gpt-4o", Name: "GPT-4o", Provider: "openai", Description: "综合能力更强，适合复杂推理任务"},
-		{Id: "deepseek-chat", Name: "DeepSeek Chat", Provider: "deepseek", Description: "性价比较高的中文对话模型"},
-		{Id: "qwen-plus", Name: "Qwen Plus", Provider: "qwen", Description: "阿里通义千问，中文场景表现良好"},
-		{Id: "glm-4", Name: "GLM-4", Provider: "zhipu", Description: "智谱 GLM-4，支持长文本与工具调用"},
+		{Id: deepseek.DeepSeekChat, Name: "DeepSeek Chat", Provider: "deepseek", Description: "DeepSeek 通用对话模型，性价比高，适合日常对话与工具调用"},
+		{Id: deepseek.DeepSeekReasoner, Name: "DeepSeek Reasoner", Provider: "deepseek", Description: "DeepSeek 推理模型，适合复杂推理、代码与数学任务"},
 	}
 }
 
@@ -73,5 +77,5 @@ func IsValidTool(id string) bool { return toolIDs()[id] }
 // IsValidSkill 校验 Skill id 是否在可选清单内。
 func IsValidSkill(id string) bool { return skillIDs()[id] }
 
-// DefaultModel 是新建 Agent 时的默认模型。
-const DefaultModel = "gpt-4o-mini"
+// DefaultModel 是新建 Agent（含主 Agent 与子 Agent）时的默认模型。
+var DefaultModel = deepseek.DeepSeekChat

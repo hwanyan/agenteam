@@ -126,6 +126,78 @@ func (x *SendMessageResponse) GetAgentMessage() *ChatMessage {
 	return nil
 }
 
+// SendMessageStream 的流式响应：
+// - 流的第一条消息携带已持久化的 user_message（不携带 delta）；
+// - 中间的每条消息携带一段增量文本 delta（对应模型输出的一个 token/片段）；
+// - 流的最后一条消息 done=true，并携带已持久化的完整 agent_message。
+type SendMessageStreamResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Delta         string                 `protobuf:"bytes,1,opt,name=delta,proto3" json:"delta,omitempty"`
+	Done          bool                   `protobuf:"varint,2,opt,name=done,proto3" json:"done,omitempty"`
+	UserMessage   *ChatMessage           `protobuf:"bytes,3,opt,name=user_message,json=userMessage,proto3" json:"user_message,omitempty"`
+	AgentMessage  *ChatMessage           `protobuf:"bytes,4,opt,name=agent_message,json=agentMessage,proto3" json:"agent_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SendMessageStreamResponse) Reset() {
+	*x = SendMessageStreamResponse{}
+	mi := &file_workspace_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendMessageStreamResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendMessageStreamResponse) ProtoMessage() {}
+
+func (x *SendMessageStreamResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_workspace_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendMessageStreamResponse.ProtoReflect.Descriptor instead.
+func (*SendMessageStreamResponse) Descriptor() ([]byte, []int) {
+	return file_workspace_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SendMessageStreamResponse) GetDelta() string {
+	if x != nil {
+		return x.Delta
+	}
+	return ""
+}
+
+func (x *SendMessageStreamResponse) GetDone() bool {
+	if x != nil {
+		return x.Done
+	}
+	return false
+}
+
+func (x *SendMessageStreamResponse) GetUserMessage() *ChatMessage {
+	if x != nil {
+		return x.UserMessage
+	}
+	return nil
+}
+
+func (x *SendMessageStreamResponse) GetAgentMessage() *ChatMessage {
+	if x != nil {
+		return x.AgentMessage
+	}
+	return nil
+}
+
 type ListMessagesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
@@ -135,7 +207,7 @@ type ListMessagesRequest struct {
 
 func (x *ListMessagesRequest) Reset() {
 	*x = ListMessagesRequest{}
-	mi := &file_workspace_proto_msgTypes[2]
+	mi := &file_workspace_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -147,7 +219,7 @@ func (x *ListMessagesRequest) String() string {
 func (*ListMessagesRequest) ProtoMessage() {}
 
 func (x *ListMessagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_proto_msgTypes[2]
+	mi := &file_workspace_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -160,7 +232,7 @@ func (x *ListMessagesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMessagesRequest.ProtoReflect.Descriptor instead.
 func (*ListMessagesRequest) Descriptor() ([]byte, []int) {
-	return file_workspace_proto_rawDescGZIP(), []int{2}
+	return file_workspace_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ListMessagesRequest) GetTeamId() string {
@@ -179,7 +251,7 @@ type ListMessagesResponse struct {
 
 func (x *ListMessagesResponse) Reset() {
 	*x = ListMessagesResponse{}
-	mi := &file_workspace_proto_msgTypes[3]
+	mi := &file_workspace_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -191,7 +263,7 @@ func (x *ListMessagesResponse) String() string {
 func (*ListMessagesResponse) ProtoMessage() {}
 
 func (x *ListMessagesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_proto_msgTypes[3]
+	mi := &file_workspace_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -204,7 +276,7 @@ func (x *ListMessagesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMessagesResponse.ProtoReflect.Descriptor instead.
 func (*ListMessagesResponse) Descriptor() ([]byte, []int) {
-	return file_workspace_proto_rawDescGZIP(), []int{3}
+	return file_workspace_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListMessagesResponse) GetMessages() []*ChatMessage {
@@ -224,13 +296,19 @@ const file_workspace_proto_rawDesc = "" +
 	"\acontent\x18\x02 \x01(\tR\acontent\"\x91\x01\n" +
 	"\x13SendMessageResponse\x12;\n" +
 	"\fuser_message\x18\x01 \x01(\v2\x18.agenteam.v1.ChatMessageR\vuserMessage\x12=\n" +
-	"\ragent_message\x18\x02 \x01(\v2\x18.agenteam.v1.ChatMessageR\fagentMessage\".\n" +
+	"\ragent_message\x18\x02 \x01(\v2\x18.agenteam.v1.ChatMessageR\fagentMessage\"\xc1\x01\n" +
+	"\x19SendMessageStreamResponse\x12\x14\n" +
+	"\x05delta\x18\x01 \x01(\tR\x05delta\x12\x12\n" +
+	"\x04done\x18\x02 \x01(\bR\x04done\x12;\n" +
+	"\fuser_message\x18\x03 \x01(\v2\x18.agenteam.v1.ChatMessageR\vuserMessage\x12=\n" +
+	"\ragent_message\x18\x04 \x01(\v2\x18.agenteam.v1.ChatMessageR\fagentMessage\".\n" +
 	"\x13ListMessagesRequest\x12\x17\n" +
 	"\ateam_id\x18\x01 \x01(\tR\x06teamId\"L\n" +
 	"\x14ListMessagesResponse\x124\n" +
-	"\bmessages\x18\x01 \x03(\v2\x18.agenteam.v1.ChatMessageR\bmessages2\x88\x02\n" +
+	"\bmessages\x18\x01 \x03(\v2\x18.agenteam.v1.ChatMessageR\bmessages2\x99\x03\n" +
 	"\x10WorkspaceService\x12y\n" +
-	"\vSendMessage\x12\x1f.agenteam.v1.SendMessageRequest\x1a .agenteam.v1.SendMessageResponse\"'\x82\xd3\xe4\x93\x02!:\x01*\"\x1c/v1/teams/{team_id}/messages\x12y\n" +
+	"\vSendMessage\x12\x1f.agenteam.v1.SendMessageRequest\x1a .agenteam.v1.SendMessageResponse\"'\x82\xd3\xe4\x93\x02!:\x01*\"\x1c/v1/teams/{team_id}/messages\x12\x8e\x01\n" +
+	"\x11SendMessageStream\x12\x1f.agenteam.v1.SendMessageRequest\x1a&.agenteam.v1.SendMessageStreamResponse\".\x82\xd3\xe4\x93\x02(:\x01*\"#/v1/teams/{team_id}/messages:stream0\x01\x12y\n" +
 	"\fListMessages\x12 .agenteam.v1.ListMessagesRequest\x1a!.agenteam.v1.ListMessagesResponse\"$\x82\xd3\xe4\x93\x02\x1e\x12\x1c/v1/teams/{team_id}/messagesB0Z.github.com/hwanyan/agenteam/pb/gen/;agenteamv1b\x06proto3"
 
 var (
@@ -245,27 +323,32 @@ func file_workspace_proto_rawDescGZIP() []byte {
 	return file_workspace_proto_rawDescData
 }
 
-var file_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_workspace_proto_goTypes = []any{
-	(*SendMessageRequest)(nil),   // 0: agenteam.v1.SendMessageRequest
-	(*SendMessageResponse)(nil),  // 1: agenteam.v1.SendMessageResponse
-	(*ListMessagesRequest)(nil),  // 2: agenteam.v1.ListMessagesRequest
-	(*ListMessagesResponse)(nil), // 3: agenteam.v1.ListMessagesResponse
-	(*ChatMessage)(nil),          // 4: agenteam.v1.ChatMessage
+	(*SendMessageRequest)(nil),        // 0: agenteam.v1.SendMessageRequest
+	(*SendMessageResponse)(nil),       // 1: agenteam.v1.SendMessageResponse
+	(*SendMessageStreamResponse)(nil), // 2: agenteam.v1.SendMessageStreamResponse
+	(*ListMessagesRequest)(nil),       // 3: agenteam.v1.ListMessagesRequest
+	(*ListMessagesResponse)(nil),      // 4: agenteam.v1.ListMessagesResponse
+	(*ChatMessage)(nil),               // 5: agenteam.v1.ChatMessage
 }
 var file_workspace_proto_depIdxs = []int32{
-	4, // 0: agenteam.v1.SendMessageResponse.user_message:type_name -> agenteam.v1.ChatMessage
-	4, // 1: agenteam.v1.SendMessageResponse.agent_message:type_name -> agenteam.v1.ChatMessage
-	4, // 2: agenteam.v1.ListMessagesResponse.messages:type_name -> agenteam.v1.ChatMessage
-	0, // 3: agenteam.v1.WorkspaceService.SendMessage:input_type -> agenteam.v1.SendMessageRequest
-	2, // 4: agenteam.v1.WorkspaceService.ListMessages:input_type -> agenteam.v1.ListMessagesRequest
-	1, // 5: agenteam.v1.WorkspaceService.SendMessage:output_type -> agenteam.v1.SendMessageResponse
-	3, // 6: agenteam.v1.WorkspaceService.ListMessages:output_type -> agenteam.v1.ListMessagesResponse
-	5, // [5:7] is the sub-list for method output_type
-	3, // [3:5] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	5, // 0: agenteam.v1.SendMessageResponse.user_message:type_name -> agenteam.v1.ChatMessage
+	5, // 1: agenteam.v1.SendMessageResponse.agent_message:type_name -> agenteam.v1.ChatMessage
+	5, // 2: agenteam.v1.SendMessageStreamResponse.user_message:type_name -> agenteam.v1.ChatMessage
+	5, // 3: agenteam.v1.SendMessageStreamResponse.agent_message:type_name -> agenteam.v1.ChatMessage
+	5, // 4: agenteam.v1.ListMessagesResponse.messages:type_name -> agenteam.v1.ChatMessage
+	0, // 5: agenteam.v1.WorkspaceService.SendMessage:input_type -> agenteam.v1.SendMessageRequest
+	0, // 6: agenteam.v1.WorkspaceService.SendMessageStream:input_type -> agenteam.v1.SendMessageRequest
+	3, // 7: agenteam.v1.WorkspaceService.ListMessages:input_type -> agenteam.v1.ListMessagesRequest
+	1, // 8: agenteam.v1.WorkspaceService.SendMessage:output_type -> agenteam.v1.SendMessageResponse
+	2, // 9: agenteam.v1.WorkspaceService.SendMessageStream:output_type -> agenteam.v1.SendMessageStreamResponse
+	4, // 10: agenteam.v1.WorkspaceService.ListMessages:output_type -> agenteam.v1.ListMessagesResponse
+	8, // [8:11] is the sub-list for method output_type
+	5, // [5:8] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_workspace_proto_init() }
@@ -280,7 +363,7 @@ func file_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_workspace_proto_rawDesc), len(file_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

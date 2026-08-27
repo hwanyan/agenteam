@@ -16,6 +16,16 @@ service WorkspaceService {
     };
   }
 
+  // SendMessageStream 与 SendMessage 语义一致，区别在于以 gRPC server-streaming
+  // 方式逐块推送模型的增量输出（底层对接 DeepSeek 流式 Chat Completions 接口），
+  // 经 grpc-gateway 转为 HTTP chunked 响应，供前端实现打字机效果的流式对话界面。
+  rpc SendMessageStream(SendMessageRequest) returns (stream SendMessageStreamResponse) {
+    option (google.api.http) = {
+      post: "/v1/teams/{team_id}/messages:stream"
+      body: "*"
+    };
+  }
+
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse) {
     option (google.api.http) = {
       get: "/v1/teams/{team_id}/messages"
@@ -31,6 +41,17 @@ message SendMessageRequest {
 message SendMessageResponse {
   ChatMessage user_message = 1;
   ChatMessage agent_message = 2;
+}
+
+// SendMessageStream 的流式响应：
+// - 流的第一条消息携带已持久化的 user_message（不携带 delta）；
+// - 中间的每条消息携带一段增量文本 delta（对应模型输出的一个 token/片段）；
+// - 流的最后一条消息 done=true，并携带已持久化的完整 agent_message。
+message SendMessageStreamResponse {
+  string delta = 1;
+  bool done = 2;
+  ChatMessage user_message = 3;
+  ChatMessage agent_message = 4;
 }
 
 message ListMessagesRequest {

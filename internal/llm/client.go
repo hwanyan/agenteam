@@ -1,24 +1,20 @@
 // Package llm 封装与大模型对话的能力。
 //
-// 默认实现是一个兼容 OpenAI Chat Completions 协议的 HTTP 客户端，
-// 可通过环境变量 AGENTEAM_LLM_BASE_URL / AGENTEAM_LLM_API_KEY 指向任意
-// 兼容 OpenAI 协议的服务商（OpenAI / DeepSeek / 通义千问 / 智谱等均提供兼容接口）。
+// 实现基于 DeepSeek 官方推荐的 Go SDK（github.com/cohesion-org/deepseek-go），
+// 直接调用 DeepSeek 的 Chat Completions 接口，而非自行拼装 HTTP 请求。
 //
-// 安全说明：Base URL 与 API Key 均只允许通过环境变量配置（遵循 secrets 只走 env
-// 的原则），不接受来自用户请求的动态取值，避免 SSRF 风险。
+// 安全说明：API Key（及可选的 Base URL 覆盖）均只允许通过环境变量配置
+// （遵循 secrets 只走 env 的原则），不接受来自用户请求的动态取值。本包不直接读取
+// 环境变量，而是由调用方（main.go）从 internal/config.Config（其取值全部来自
+// 环境变量）中取出后传入 New：
+//   - DeepSeekAPIKey  ：DeepSeek 平台申请的密钥（https://platform.deepseek.com/api_keys）
+//   - DeepSeekBaseURL ：可选，自定义 API Base URL，默认 https://api.deepseek.com/
+//
+// 本文件只包含对外的接口层（类型定义 + Client 接口 + 构造入口 New）；
+// 具体实现（DeepSeekClient / EchoClient）见同包下的 impl.go。
 package llm
 
-import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"strings"
-	"time"
-)
+import "context"
 
 // Message 是对话中的一条消息。
 type Message struct {
@@ -34,119 +30,34 @@ type ChatRequest struct {
 	UserMessage  string
 }
 
+// StreamChunk 是流式对话中的一个增量片段。
+//
+// 消费方应持续从 ChatStream 返回的 channel 中读取，直到 channel 被关闭；
+// 若某个 chunk 携带非空 Err，代表流式过程中发生错误，消费方应终止读取并将
+// 已累积的内容 + 该错误一并处理（DeepSeek 与 Echo 两种实现均保证 Err 非空时
+// 之后不会再有更多 chunk 写入该 channel）。
+type StreamChunk struct {
+	Delta string
+	Err   error
+}
+
 // Client 定义与 LLM 对话的能力，方便替换/测试。
+// 主 Agent 与平台上创建的所有子 Agent 均通过此接口选用各自配置的模型并发起对话。
 type Client interface {
 	Chat(ctx context.Context, req ChatRequest) (string, error)
+	// ChatStream 以流式方式发起对话，返回的 channel 会持续推送增量文本片段，
+	// 供上层（如 WorkspaceService.SendMessageStream）实时转发给前端，实现打字机效果。
+	ChatStream(ctx context.Context, req ChatRequest) (<-chan StreamChunk, error)
 }
 
-// NewFromEnv 根据环境变量构建 LLM 客户端。
-// 若未配置 AGENTEAM_LLM_API_KEY，则降级为本地 Echo 客户端，方便无密钥场景下跑通整套流程。
-func NewFromEnv() Client {
-	apiKey := os.Getenv("AGENTEAM_LLM_API_KEY")
-	if apiKey == "" {
-		return &EchoClient{}
+// New 根据配置构建 LLM 客户端（apiKey/baseURL 来自 internal/config.Config，
+// 其取值最终都来自环境变量）。若 apiKey 为空，则降级为本地 Echo 客户端，
+// 方便无密钥场景下跑通整套流程。
+//
+// 具体实现见 impl.go 中的 DeepSeekClient / EchoClient。
+func New(apiKey, baseURL string) Client {
+	if cli := newDeepSeekClient(apiKey, baseURL); cli != nil {
+		return cli
 	}
-	baseURL := os.Getenv("AGENTEAM_LLM_BASE_URL")
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
-	return &OpenAICompatClient{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		httpCli: &http.Client{Timeout: 60 * time.Second},
-	}
-}
-
-// OpenAICompatClient 是兼容 OpenAI Chat Completions 协议的实现。
-type OpenAICompatClient struct {
-	baseURL string
-	apiKey  string
-	httpCli *http.Client
-}
-
-type chatCompletionMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type chatCompletionRequest struct {
-	Model    string                  `json:"model"`
-	Messages []chatCompletionMessage `json:"messages"`
-}
-
-type chatCompletionResponse struct {
-	Choices []struct {
-		Message chatCompletionMessage `json:"message"`
-	} `json:"choices"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-func (c *OpenAICompatClient) Chat(ctx context.Context, req ChatRequest) (string, error) {
-	msgs := make([]chatCompletionMessage, 0, len(req.History)+2)
-	if req.SystemPrompt != "" {
-		msgs = append(msgs, chatCompletionMessage{Role: "system", Content: req.SystemPrompt})
-	}
-	for _, h := range req.History {
-		msgs = append(msgs, chatCompletionMessage{Role: h.Role, Content: h.Content})
-	}
-	msgs = append(msgs, chatCompletionMessage{Role: "user", Content: req.UserMessage})
-
-	body, err := json.Marshal(chatCompletionRequest{Model: req.Model, Messages: msgs})
-	if err != nil {
-		return "", fmt.Errorf("llm: marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("llm: build request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.httpCli.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("llm: call chat completions: %w", err)
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("llm: read response: %w", err)
-	}
-
-	var out chatCompletionResponse
-	if err := json.Unmarshal(data, &out); err != nil {
-		return "", fmt.Errorf("llm: unmarshal response: %w", err)
-	}
-	if out.Error != nil {
-		return "", fmt.Errorf("llm: upstream error: %s", out.Error.Message)
-	}
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("llm: upstream status %d: %s", resp.StatusCode, string(data))
-	}
-	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("llm: empty choices in response")
-	}
-	return out.Choices[0].Message.Content, nil
-}
-
-// EchoClient 是无需任何密钥即可运行的本地兜底实现，
-// 用于演示 Agent 的 prompt / 模型 / 工具 / Skill 配置是如何生效的，
-// 而不依赖任何真实的外部大模型服务。
-type EchoClient struct{}
-
-func (c *EchoClient) Chat(_ context.Context, req ChatRequest) (string, error) {
-	var b strings.Builder
-	b.WriteString("[本地演示模式，未配置 AGENTEAM_LLM_API_KEY，以下为模拟回复]\n\n")
-	if req.SystemPrompt != "" {
-		b.WriteString("我是按照如下 System Prompt 运作的 Agent：\n")
-		b.WriteString(req.SystemPrompt)
-		b.WriteString("\n\n")
-	}
-	b.WriteString("收到你的消息：")
-	b.WriteString(req.UserMessage)
-	b.WriteString("\n\n若要接入真实模型，请设置环境变量 AGENTEAM_LLM_API_KEY（以及可选的 AGENTEAM_LLM_BASE_URL）后重启服务。")
-	return b.String(), nil
+	return &EchoClient{}
 }

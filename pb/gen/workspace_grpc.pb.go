@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorkspaceService_SendMessage_FullMethodName  = "/agenteam.v1.WorkspaceService/SendMessage"
-	WorkspaceService_ListMessages_FullMethodName = "/agenteam.v1.WorkspaceService/ListMessages"
+	WorkspaceService_SendMessage_FullMethodName       = "/agenteam.v1.WorkspaceService/SendMessage"
+	WorkspaceService_SendMessageStream_FullMethodName = "/agenteam.v1.WorkspaceService/SendMessageStream"
+	WorkspaceService_ListMessages_FullMethodName      = "/agenteam.v1.WorkspaceService/ListMessages"
 )
 
 // WorkspaceServiceClient is the client API for WorkspaceService service.
@@ -30,6 +31,10 @@ const (
 // WorkspaceService 负责“工作区”中用户与团队主 Agent 的对话交互。
 type WorkspaceServiceClient interface {
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
+	// SendMessageStream 与 SendMessage 语义一致，区别在于以 gRPC server-streaming
+	// 方式逐块推送模型的增量输出（底层对接 DeepSeek 流式 Chat Completions 接口），
+	// 经 grpc-gateway 转为 HTTP chunked 响应，供前端实现打字机效果的流式对话界面。
+	SendMessageStream(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SendMessageStreamResponse], error)
 	ListMessages(ctx context.Context, in *ListMessagesRequest, opts ...grpc.CallOption) (*ListMessagesResponse, error)
 }
 
@@ -51,6 +56,25 @@ func (c *workspaceServiceClient) SendMessage(ctx context.Context, in *SendMessag
 	return out, nil
 }
 
+func (c *workspaceServiceClient) SendMessageStream(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SendMessageStreamResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &WorkspaceService_ServiceDesc.Streams[0], WorkspaceService_SendMessageStream_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SendMessageRequest, SendMessageStreamResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type WorkspaceService_SendMessageStreamClient = grpc.ServerStreamingClient[SendMessageStreamResponse]
+
 func (c *workspaceServiceClient) ListMessages(ctx context.Context, in *ListMessagesRequest, opts ...grpc.CallOption) (*ListMessagesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListMessagesResponse)
@@ -68,6 +92,10 @@ func (c *workspaceServiceClient) ListMessages(ctx context.Context, in *ListMessa
 // WorkspaceService 负责“工作区”中用户与团队主 Agent 的对话交互。
 type WorkspaceServiceServer interface {
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
+	// SendMessageStream 与 SendMessage 语义一致，区别在于以 gRPC server-streaming
+	// 方式逐块推送模型的增量输出（底层对接 DeepSeek 流式 Chat Completions 接口），
+	// 经 grpc-gateway 转为 HTTP chunked 响应，供前端实现打字机效果的流式对话界面。
+	SendMessageStream(*SendMessageRequest, grpc.ServerStreamingServer[SendMessageStreamResponse]) error
 	ListMessages(context.Context, *ListMessagesRequest) (*ListMessagesResponse, error)
 	mustEmbedUnimplementedWorkspaceServiceServer()
 }
@@ -81,6 +109,9 @@ type UnimplementedWorkspaceServiceServer struct{}
 
 func (UnimplementedWorkspaceServiceServer) SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendMessage not implemented")
+}
+func (UnimplementedWorkspaceServiceServer) SendMessageStream(*SendMessageRequest, grpc.ServerStreamingServer[SendMessageStreamResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method SendMessageStream not implemented")
 }
 func (UnimplementedWorkspaceServiceServer) ListMessages(context.Context, *ListMessagesRequest) (*ListMessagesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListMessages not implemented")
@@ -124,6 +155,17 @@ func _WorkspaceService_SendMessage_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorkspaceService_SendMessageStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SendMessageRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(WorkspaceServiceServer).SendMessageStream(m, &grpc.GenericServerStream[SendMessageRequest, SendMessageStreamResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type WorkspaceService_SendMessageStreamServer = grpc.ServerStreamingServer[SendMessageStreamResponse]
+
 func _WorkspaceService_ListMessages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListMessagesRequest)
 	if err := dec(in); err != nil {
@@ -158,6 +200,12 @@ var WorkspaceService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _WorkspaceService_ListMessages_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "SendMessageStream",
+			Handler:       _WorkspaceService_SendMessageStream_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "workspace.proto",
 }
