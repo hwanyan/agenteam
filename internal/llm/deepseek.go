@@ -31,6 +31,14 @@ func newDeepSeekClient(apiKey, baseURL string) *DeepSeekClient {
 		deepseek.WithTimeout(60 * time.Second),
 	}
 	if baseURL = strings.TrimSpace(baseURL); baseURL != "" {
+		// DeepSeek SDK 内部用 BaseURL + Path 做纯字符串拼接（不会自动补分隔符，
+		// Path 默认值为不带前导 "/" 的 "chat/completions"），若用户配置的
+		// DEEPSEEK_BASE_URL 缺少结尾斜杠（如 "https://api.deepseek.com/v1"），会拼出
+		// 形如 "https://api.deepseek.com/v1chat/completions" 的畸形地址，导致请求
+		// 404。这里统一补全结尾斜杠，避免因配置差异导致的隐蔽故障。
+		if !strings.HasSuffix(baseURL, "/") {
+			baseURL += "/"
+		}
 		opts = append(opts, deepseek.WithBaseURL(baseURL))
 	}
 
