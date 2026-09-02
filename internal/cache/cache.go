@@ -23,6 +23,22 @@ type AgentSnapshot struct {
 	Status    string // AgentStatus 枚举的字符串形式，如 "AGENT_STATUS_LOADED"
 	CreatedAt int64
 	UpdatedAt int64
+
+	// Kind 是 Agent 的创建/接入方式的字符串形式（AgentKind 枚举，如 "AGENT_KIND_PROMPT" / "AGENT_KIND_A2A"）。
+	Kind string
+	// A2A 仅当 Kind == "AGENT_KIND_A2A" 时有效，承载对外部 A2A Agent 的接入配置与只读展示信息。
+	A2A *A2ASnapshot
+}
+
+// A2ASnapshot 是 A2AConfig 在运行态缓存中的快照形式。
+type A2ASnapshot struct {
+	EndpointURL       string
+	AuthScheme        string
+	AuthToken         string
+	RemoteAgentName   string
+	RemoteDescription string
+	RemoteSkills      []string
+	Streaming         bool
 }
 
 // AgentCache 定义 Agent 运行态缓存的读写能力。

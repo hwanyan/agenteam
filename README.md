@@ -14,6 +14,8 @@ internal/cache               Agent 运行态热缓存接口 + Redis 实现
 internal/runtime             Agent 运行态管理：配置校验、加载/重新加载、版本号（底层用 internal/cache）
 internal/llm                 LLM 客户端：client.go 为接口层（Client/ChatRequest/StreamChunk/New），
                               impl.go 为实现层（DeepSeekClient 基于官方 Go SDK；EchoClient 为无密钥兜底实现）
+internal/a2a                 A2A（Agent2Agent）协议客户端：Agent Card 发现 + message/send（非流式）+
+                              message/stream（SSE 流式），用于将平台内 Agent 链接到外部 A2A Agent 提供方
 internal/config              统一配置加载：从环境变量读取所有配置项（含 DeepSeek API Key）
 internal/options             可选模型 / MCP 工具 / Skill 的静态清单
 internal/service             gRPC 服务实现（TeamService / AgentService / WorkspaceService）
@@ -37,18 +39,32 @@ Store 按数据形态拆分到不同数据库，而非塞进同一种数据库�
 
 ## 核心概念
 
-- **Team（团队）**：创建时自动生成一个 `is_main=true` 的主 Agent。
-- **Agent**：包含 name / prompt / model / mcp_tools / skills 等配置，
-  保存（`UpdateAgent`）时会触发 `internal/runtime.Manager.Load`：
-  校验配置合法性 → 版本号自增 → 状态置为 `LOADED`（校验失败则为 `ERROR`），
-  并将结果写入 Redis 作为当前生效的运行态快照。
-- **Workspace（工作区）**：`SendMessage` 会以 Agent 当前生效配置组装 system prompt
-  （包含绑定的 MCP 工具 / Skill 说明），调用 LLM 客户端得到回复，并持久化整段对话到 MongoDB。
-  另提供流式版本 `SendMessageStream`（HTTP: `POST /v1/teams/{team_id}/messages:stream`），
-  以 gRPC server-streaming + grpc-gateway chunked 响应的方式，逐段推送模型的增量输出
-  （底层对接 DeepSeek 官方 SDK 的 `CreateChatCompletionStream`），前端（`agenteam-web`）已接入
-  该接口实现打字机效果的流式对话界面；用户消息与最终完整回复仍会分别在流的首尾持久化到
-  MongoDB，与非流式接口的历史记录保持一致。
+- **Team（团队）**：创建时自动生成一个 `is_main=true` 的主 Agent（固定为 Prompt 方式）。
+- **Agent**：`kind` 字段区分两种创建/接入方式（创建后不可变更）：
+  - `AGENT_KIND_PROMPT`（默认）：本地 Prompt + LLM 驱动，包含 name / prompt / model / mcp_tools / skills 等配置。
+  - `AGENT_KIND_A2A`：通过 [A2A（Agent2Agent）协议](https://a2a-protocol.org/) 链接一个外部 Agent 提供方，
+    只需 name + `a2a_config.endpoint_url`（可选 `auth_scheme`/`auth_token`），prompt/model/mcp_tools/skills 对该方式无效。
+  两种方式均在保存（`CreateAgent`/`UpdateAgent`）时触发 `internal/runtime.Manager.Load`：
+  校验配置合法性（A2A 方式还会实际向 `endpoint_url` 发起一次 Agent Card 发现请求校验连通性，
+  并回填对端名称/描述/技能/是否支持流式到 `a2a_config` 的只读字段）→ 版本号自增 →
+  状态置为 `LOADED`（失败则为 `ERROR`），并将结果写入 Redis 作为当前生效的运行态快照。
+  另提供 `DiscoverA2AAgent` RPC，供前端在正式创建/保存 A2A Agent 前先行探测连通性与预览对端信息，
+  不产生任何持久化副作用。
+  出于安全考虑，`a2a_config.auth_token` 只在写请求（Create/UpdateAgent）中传入，
+  任何服务端响应都不会回显其明文值，只通过 `auth_token_set` 标记是否已配置凭证
+  （`internal/service.redactAgent` 统一脱敏）。
+- **Workspace（工作区）**：`SendMessage`/`SendMessageStream` 会按 Agent 的 `kind` 分发：
+  - Prompt 方式：以 Agent 当前生效配置组装 system prompt（包含绑定的 MCP 工具 / Skill 说明），
+    调用 LLM 客户端得到回复；流式版本对接 DeepSeek 官方 SDK 的 `CreateChatCompletionStream`
+    逐段推送增量输出。
+  - A2A 方式：通过 `internal/a2a.Client` 将用户消息转发给外部 Agent：
+    - 若对端 Agent Card 声明 `capabilities.streaming=true`（保存/加载时探测并缓存于
+      `a2a_config.streaming`），`SendMessageStream` 会调用 `Client.SendMessageStream`
+      对接 A2A 协议的 JSON-RPC 方法 `message/stream`（SSE），逐段转发对端产生的增量文本，
+      与 Prompt 方式一样具有逐字打字机效果；
+    - 否则（或非流式接口 `SendMessage`）退化/统一调用非流式的 `message/send`，
+      一次性获取完整回复后（流式场景下）作为单个 delta 推送。
+  两种方式下，用户消息与最终完整回复都会持久化到 MongoDB，历史记录格式保持一致。
   - **HTTP 网关注册方式说明**：`main.go` 中 Team/Agent 服务通过 grpc-gateway 的 in-process
     直调（`RegisterXxxHandlerServer`）挂载，无需拨号；但 Workspace 服务因含 server-streaming
     RPC，in-process 直调模式对流式转发返回 `Unimplemented`（grpc-gateway 已知限制），因此改为
@@ -105,6 +121,12 @@ go run .
 - MCP 工具与 Skill 目前仅作为“配置元数据”传递给 LLM 作为上下文说明，
   **尚未接入真正的 MCP 协议调用**；后续可在 `internal/runtime` 中扩展为
   真正建立 MCP Server 连接并支持 function calling。
+- A2A 接入目前覆盖 Agent Card 发现、`message/send`（非流式）与 `message/stream`
+  （流式，SSE）；`internal/a2a` 对 SSE 事件的解析同时兼容 A2A 1.0 规范的
+  oneof 嵌套风格（`{"statusUpdate": {...}}`）与目前主流 SDK（0.2.x/0.3.x 系列）
+  仍在使用的扁平 `"kind"` 判别字段风格，但尚未实现 `tasks/*`（长任务轮询/取消）
+  等 A2A 规范中的其他方法；鉴权也只支持 Bearer Token，尚未支持 OAuth2/mTLS 等
+  A2A SecurityScheme 的其他方案。
 - `DeleteTeam` 跨 PostgreSQL / MongoDB 两个数据库操作，非分布式事务，
   采用“先删关系型主数据、再清理聊天记录”的最终一致性策略：极端情况下
   可能残留孤立的聊天记录，但不影响团队/Agent 数据一致性。

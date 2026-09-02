@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/hwanyan/agenteam/internal/a2a"
 	"github.com/hwanyan/agenteam/internal/idgen"
 	"github.com/hwanyan/agenteam/internal/llm"
 	"github.com/hwanyan/agenteam/internal/options"
@@ -68,15 +69,10 @@ func (s *WorkspaceServer) SendMessage(ctx context.Context, req *agenteamv1.SendM
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "查询历史消息失败: %v", err)
 	}
-	history := buildHistory(existing)
-	reply, err := s.LLM.Chat(ctx, llm.ChatRequest{
-		Model:        agent.Model,
-		SystemPrompt: composeSystemPrompt(agent),
-		History:      history,
-		UserMessage:  content,
-	})
+
+	reply, err := s.replyFor(ctx, agent, content, existing)
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "调用模型失败: %v", err)
+		return nil, err
 	}
 
 	agentMsg := &agenteamv1.ChatMessage{
@@ -92,6 +88,38 @@ func (s *WorkspaceServer) SendMessage(ctx context.Context, req *agenteamv1.SendM
 	}
 
 	return &agenteamv1.SendMessageResponse{UserMessage: userMsg, AgentMessage: agentMsg}, nil
+}
+
+// replyFor 按 Agent.Kind 分发获取回复的方式：
+//   - AGENT_KIND_A2A：通过 A2A 协议转发给外部 Agent（internal/a2a），
+//     忽略本地 model/mcp_tools/skills 等 Prompt 方式专属的配置。
+//   - 其余（AGENT_KIND_PROMPT/未指定）：沿用本地 Prompt + LLM 的原有逻辑。
+func (s *WorkspaceServer) replyFor(ctx context.Context, agent *agenteamv1.Agent, content string, history []*agenteamv1.ChatMessage) (string, error) {
+	if agent.Kind == agenteamv1.AgentKind_AGENT_KIND_A2A {
+		if agent.A2AConfig == nil || agent.A2AConfig.EndpointUrl == "" {
+			return "", status.Error(codes.FailedPrecondition, "该 Agent 尚未配置 A2A 接入地址")
+		}
+		reply, err := s.A2A.SendMessage(ctx, a2a.Config{
+			EndpointURL: agent.A2AConfig.EndpointUrl,
+			AuthScheme:  agent.A2AConfig.AuthScheme,
+			AuthToken:   agent.A2AConfig.AuthToken,
+		}, content)
+		if err != nil {
+			return "", status.Errorf(codes.Unavailable, "调用 A2A Agent 失败: %v", err)
+		}
+		return reply, nil
+	}
+
+	reply, err := s.LLM.Chat(ctx, llm.ChatRequest{
+		Model:        agent.Model,
+		SystemPrompt: composeSystemPrompt(agent),
+		History:      buildHistory(history),
+		UserMessage:  content,
+	})
+	if err != nil {
+		return "", status.Errorf(codes.Unavailable, "调用模型失败: %v", err)
+	}
+	return reply, nil
 }
 
 // SendMessageStream 与 SendMessage 语义一致，区别在于以 gRPC server-streaming 方式
@@ -146,6 +174,13 @@ func (s *WorkspaceServer) SendMessageStream(req *agenteamv1.SendMessageRequest, 
 	}
 	history := buildHistory(existing)
 
+	// A2A 方式对接 A2A 协议的 message/stream（若对端支持流式；否则退化为
+	// "一次性获取完整回复后作为单个 delta 推送"，前端仍走同一套流式 UI，只是
+	// 没有逐字打字机效果）。
+	if agent.Kind == agenteamv1.AgentKind_AGENT_KIND_A2A {
+		return s.streamA2AReply(ctx, stream, team.Id, agent, content)
+	}
+
 	chunks, err := s.LLM.ChatStream(ctx, llm.ChatRequest{
 		Model:        agent.Model,
 		SystemPrompt: composeSystemPrompt(agent),
@@ -195,6 +230,72 @@ func (s *WorkspaceServer) persistAgentReply(ctx context.Context, teamID, agentID
 		return nil, err
 	}
 	return agentMsg, nil
+}
+
+// streamA2AReply 处理 A2A 方式 Agent 的流式回复：
+//   - 若对端 Agent Card 声明 capabilities.streaming=true，通过 internal/a2a.Client.
+//     SendMessageStream 对接 A2A 协议的 message/stream（SSE），逐段转发对端产生的
+//     增量文本；
+//   - 否则（对端不支持流式，或尚未探测到该能力）退化为调用非流式的 SendMessage，
+//     一次性获取完整回复后作为单个 delta 推送，前端仍走同一套流式 UI，只是没有
+//     逐字打字机效果。
+//
+// 两种路径最终都会把拼接得到的完整回复持久化为一条 agent 消息。
+func (s *WorkspaceServer) streamA2AReply(ctx context.Context, stream agenteamv1.WorkspaceService_SendMessageStreamServer, teamID string, agent *agenteamv1.Agent, content string) error {
+	if agent.A2AConfig == nil || agent.A2AConfig.EndpointUrl == "" {
+		return status.Error(codes.FailedPrecondition, "该 Agent 尚未配置 A2A 接入地址")
+	}
+	cfg := a2a.Config{
+		EndpointURL: agent.A2AConfig.EndpointUrl,
+		AuthScheme:  agent.A2AConfig.AuthScheme,
+		AuthToken:   agent.A2AConfig.AuthToken,
+	}
+
+	if !agent.A2AConfig.Streaming {
+		reply, err := s.A2A.SendMessage(ctx, cfg, content)
+		if err != nil {
+			return status.Errorf(codes.Unavailable, "调用 A2A Agent 失败: %v", err)
+		}
+		if reply != "" {
+			if err := stream.Send(&agenteamv1.SendMessageStreamResponse{Delta: reply}); err != nil {
+				return err
+			}
+		}
+		agentMsg, err := s.persistAgentReply(ctx, teamID, agent.Id, reply)
+		if err != nil {
+			return status.Errorf(codes.Internal, "保存回复失败: %v", err)
+		}
+		return stream.Send(&agenteamv1.SendMessageStreamResponse{Done: true, AgentMessage: agentMsg})
+	}
+
+	chunks, err := s.A2A.SendMessageStream(ctx, cfg, content)
+	if err != nil {
+		return status.Errorf(codes.Unavailable, "调用 A2A Agent 失败: %v", err)
+	}
+
+	var full strings.Builder
+	for chunk := range chunks {
+		if chunk.Err != nil {
+			// 已生成的部分内容仍落库，保留与前端展示一致的历史记录。
+			if full.Len() > 0 {
+				s.persistAgentReply(ctx, teamID, agent.Id, full.String())
+			}
+			return status.Errorf(codes.Unavailable, "调用 A2A Agent 失败: %v", chunk.Err)
+		}
+		if chunk.Delta == "" {
+			continue
+		}
+		full.WriteString(chunk.Delta)
+		if err := stream.Send(&agenteamv1.SendMessageStreamResponse{Delta: chunk.Delta}); err != nil {
+			return err
+		}
+	}
+
+	agentMsg, err := s.persistAgentReply(ctx, teamID, agent.Id, full.String())
+	if err != nil {
+		return status.Errorf(codes.Internal, "保存回复失败: %v", err)
+	}
+	return stream.Send(&agenteamv1.SendMessageStreamResponse{Done: true, AgentMessage: agentMsg})
 }
 
 // ListMessages 返回团队的历史聊天记录。

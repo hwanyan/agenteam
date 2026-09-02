@@ -22,6 +22,7 @@ import (
 
 	gwruntime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 
+	"github.com/hwanyan/agenteam/internal/a2a"
 	"github.com/hwanyan/agenteam/internal/cache"
 	"github.com/hwanyan/agenteam/internal/config"
 	"github.com/hwanyan/agenteam/internal/llm"
@@ -74,6 +75,7 @@ func main() {
 		Store:   st,
 		Runtime: agentruntime.New(agentCache),
 		LLM:     llm.New(cfg.DeepSeekAPIKey, cfg.DeepSeekBaseURL),
+		A2A:     a2a.New(),
 	}
 
 	teamSrv := service.NewTeamServer(deps)

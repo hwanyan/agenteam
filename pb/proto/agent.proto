@@ -31,6 +31,16 @@ service AgentService {
     };
   }
 
+  // 探测一个 A2A（Agent2Agent）协议的外部 Agent：向 endpoint_url 发起 Agent Card
+  // 发现请求，返回对端名称/描述/技能/是否支持流式等信息，供前端在正式创建/保存前
+  // 预览与校验连通性，不产生任何持久化副作用。
+  rpc DiscoverA2AAgent(DiscoverA2AAgentRequest) returns (DiscoverA2AAgentResponse) {
+    option (google.api.http) = {
+      post: "/v1/a2a/discover"
+      body: "*"
+    };
+  }
+
   // 保存 Agent 配置并触发服务端重新加载该 Agent。
   rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse) {
     option (google.api.http) = {
@@ -85,14 +95,29 @@ message ListAgentsResponse {
 message CreateAgentRequest {
   string team_id = 1;
   string name = 2;
-  string prompt = 3;
-  string model = 4;
+  string prompt = 3;             // kind=AGENT_KIND_PROMPT 时必填
+  string model = 4;              // kind=AGENT_KIND_PROMPT 时必填
   repeated string mcp_tools = 5;
   repeated string skills = 6;
+  AgentKind kind = 7;             // 默认 AGENT_KIND_PROMPT（未指定时按 Prompt 方式创建，兼容旧客户端）
+  A2AConfig a2a_config = 8;      // kind=AGENT_KIND_A2A 时必填（至少填 endpoint_url）
 }
 
 message CreateAgentResponse {
   Agent agent = 1;
+}
+
+message DiscoverA2AAgentRequest {
+  string endpoint_url = 1;
+  string auth_scheme = 2;
+  string auth_token = 3;
+}
+
+message DiscoverA2AAgentResponse {
+  string remote_agent_name = 1;
+  string remote_description = 2;
+  repeated string remote_skills = 3;
+  bool streaming = 4;
 }
 
 message UpdateAgentRequest {
@@ -102,6 +127,8 @@ message UpdateAgentRequest {
   string model = 4;
   repeated string mcp_tools = 5;
   repeated string skills = 6;
+  A2AConfig a2a_config = 7; // kind=AGENT_KIND_A2A 的 Agent 通过本字段更新接入配置；
+                            // auth_token 为空时表示“不修改现有凭证”，非空则覆盖。
 }
 
 message UpdateAgentResponse {

@@ -47,6 +47,7 @@ func (s *TeamServer) CreateTeam(ctx context.Context, req *agenteamv1.CreateTeamR
 		McpTools:  []string{},
 		Skills:    []string{},
 		IsMain:    true,
+		Kind:      agenteamv1.AgentKind_AGENT_KIND_PROMPT,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -68,7 +69,7 @@ func (s *TeamServer) CreateTeam(ctx context.Context, req *agenteamv1.CreateTeamR
 		return nil, status.Errorf(codes.Internal, "创建团队失败: %v", err)
 	}
 
-	return &agenteamv1.CreateTeamResponse{Team: team, MainAgent: agent}, nil
+	return &agenteamv1.CreateTeamResponse{Team: team, MainAgent: redactAgent(agent)}, nil
 }
 
 // ListTeams 返回全部团队。

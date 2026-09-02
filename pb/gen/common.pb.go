@@ -74,6 +74,56 @@ func (AgentStatus) EnumDescriptor() ([]byte, []int) {
 	return file_common_proto_rawDescGZIP(), []int{0}
 }
 
+// Agent 的创建/接入方式。
+type AgentKind int32
+
+const (
+	AgentKind_AGENT_KIND_UNSPECIFIED AgentKind = 0
+	AgentKind_AGENT_KIND_PROMPT      AgentKind = 1 // 平台内置：本地 Prompt + LLM 驱动（原有的唯一方式）
+	AgentKind_AGENT_KIND_A2A         AgentKind = 2 // 通过 A2A（Agent2Agent）协议链接一个外部 Agent 提供方
+)
+
+// Enum value maps for AgentKind.
+var (
+	AgentKind_name = map[int32]string{
+		0: "AGENT_KIND_UNSPECIFIED",
+		1: "AGENT_KIND_PROMPT",
+		2: "AGENT_KIND_A2A",
+	}
+	AgentKind_value = map[string]int32{
+		"AGENT_KIND_UNSPECIFIED": 0,
+		"AGENT_KIND_PROMPT":      1,
+		"AGENT_KIND_A2A":         2,
+	}
+)
+
+func (x AgentKind) Enum() *AgentKind {
+	p := new(AgentKind)
+	*p = x
+	return p
+}
+
+func (x AgentKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AgentKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_common_proto_enumTypes[1].Descriptor()
+}
+
+func (AgentKind) Type() protoreflect.EnumType {
+	return &file_common_proto_enumTypes[1]
+}
+
+func (x AgentKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AgentKind.Descriptor instead.
+func (AgentKind) EnumDescriptor() ([]byte, []int) {
+	return file_common_proto_rawDescGZIP(), []int{1}
+}
+
 // 消息发送角色
 type MessageRole int32
 
@@ -111,11 +161,11 @@ func (x MessageRole) String() string {
 }
 
 func (MessageRole) Descriptor() protoreflect.EnumDescriptor {
-	return file_common_proto_enumTypes[1].Descriptor()
+	return file_common_proto_enumTypes[2].Descriptor()
 }
 
 func (MessageRole) Type() protoreflect.EnumType {
-	return &file_common_proto_enumTypes[1]
+	return &file_common_proto_enumTypes[2]
 }
 
 func (x MessageRole) Number() protoreflect.EnumNumber {
@@ -124,7 +174,112 @@ func (x MessageRole) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use MessageRole.Descriptor instead.
 func (MessageRole) EnumDescriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{1}
+	return file_common_proto_rawDescGZIP(), []int{2}
+}
+
+// A2A（Agent2Agent）协议接入配置：把一个符合 A2A 协议的外部 Agent 接入为平台内的一个 Agent。
+// 接入时后端会向 endpoint_url 发起 Agent Card 发现请求（GET {endpoint_url}/.well-known/agent-card.json），
+// 校验对端可达并回填 remote_* 只读字段，供前端展示对端的真实能力。
+type A2AConfig struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	EndpointUrl string                 `protobuf:"bytes,1,opt,name=endpoint_url,json=endpointUrl,proto3" json:"endpoint_url,omitempty"` // 外部 Agent 的服务地址（Agent Card 中 AgentInterface.url，或其 base url）
+	AuthScheme  string                 `protobuf:"bytes,2,opt,name=auth_scheme,json=authScheme,proto3" json:"auth_scheme,omitempty"`    // 鉴权方式，目前支持: ""（无）/ "bearer"
+	AuthToken   string                 `protobuf:"bytes,3,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`       // 鉴权凭证（如 Bearer Token）。写入专用：仅出现在
+	// CreateAgent/UpdateAgent 请求中；服务端任何响应都不会回显真实值
+	// （见 auth_token_set），避免密钥泄露给前端。
+	AuthTokenSet      bool     `protobuf:"varint,4,opt,name=auth_token_set,json=authTokenSet,proto3" json:"auth_token_set,omitempty"`             // 只读：标记当前是否已配置鉴权凭证（不回显具体值）
+	RemoteAgentName   string   `protobuf:"bytes,5,opt,name=remote_agent_name,json=remoteAgentName,proto3" json:"remote_agent_name,omitempty"`     // 只读：从对端 Agent Card 中获取到的名称
+	RemoteDescription string   `protobuf:"bytes,6,opt,name=remote_description,json=remoteDescription,proto3" json:"remote_description,omitempty"` // 只读：从对端 Agent Card 中获取到的描述
+	RemoteSkills      []string `protobuf:"bytes,7,rep,name=remote_skills,json=remoteSkills,proto3" json:"remote_skills,omitempty"`                // 只读：对端 Agent Card 声明的技能名称列表
+	Streaming         bool     `protobuf:"varint,8,opt,name=streaming,proto3" json:"streaming,omitempty"`                                         // 只读：对端 Agent Card 中 capabilities.streaming 声明
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *A2AConfig) Reset() {
+	*x = A2AConfig{}
+	mi := &file_common_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *A2AConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*A2AConfig) ProtoMessage() {}
+
+func (x *A2AConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_common_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use A2AConfig.ProtoReflect.Descriptor instead.
+func (*A2AConfig) Descriptor() ([]byte, []int) {
+	return file_common_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *A2AConfig) GetEndpointUrl() string {
+	if x != nil {
+		return x.EndpointUrl
+	}
+	return ""
+}
+
+func (x *A2AConfig) GetAuthScheme() string {
+	if x != nil {
+		return x.AuthScheme
+	}
+	return ""
+}
+
+func (x *A2AConfig) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+func (x *A2AConfig) GetAuthTokenSet() bool {
+	if x != nil {
+		return x.AuthTokenSet
+	}
+	return false
+}
+
+func (x *A2AConfig) GetRemoteAgentName() string {
+	if x != nil {
+		return x.RemoteAgentName
+	}
+	return ""
+}
+
+func (x *A2AConfig) GetRemoteDescription() string {
+	if x != nil {
+		return x.RemoteDescription
+	}
+	return ""
+}
+
+func (x *A2AConfig) GetRemoteSkills() []string {
+	if x != nil {
+		return x.RemoteSkills
+	}
+	return nil
+}
+
+func (x *A2AConfig) GetStreaming() bool {
+	if x != nil {
+		return x.Streaming
+	}
+	return false
 }
 
 // Agent 是团队中的最小执行单元，目前每个团队自动拥有一个主 Agent。
@@ -134,21 +289,23 @@ type Agent struct {
 	TeamId        string                 `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
 	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	Prompt        string                 `protobuf:"bytes,4,opt,name=prompt,proto3" json:"prompt,omitempty"`
-	Model         string                 `protobuf:"bytes,5,opt,name=model,proto3" json:"model,omitempty"`                       // 对应 ModelOption.id
-	McpTools      []string               `protobuf:"bytes,6,rep,name=mcp_tools,json=mcpTools,proto3" json:"mcp_tools,omitempty"` // 对应 ToolOption.id 列表
-	Skills        []string               `protobuf:"bytes,7,rep,name=skills,proto3" json:"skills,omitempty"`                     // 对应 SkillOption.id 列表
+	Model         string                 `protobuf:"bytes,5,opt,name=model,proto3" json:"model,omitempty"`                       // 对应 ModelOption.id；仅 kind=AGENT_KIND_PROMPT 时有效
+	McpTools      []string               `protobuf:"bytes,6,rep,name=mcp_tools,json=mcpTools,proto3" json:"mcp_tools,omitempty"` // 对应 ToolOption.id 列表；仅 kind=AGENT_KIND_PROMPT 时有效
+	Skills        []string               `protobuf:"bytes,7,rep,name=skills,proto3" json:"skills,omitempty"`                     // 对应 SkillOption.id 列表；仅 kind=AGENT_KIND_PROMPT 时有效
 	IsMain        bool                   `protobuf:"varint,8,opt,name=is_main,json=isMain,proto3" json:"is_main,omitempty"`
 	Version       int64                  `protobuf:"varint,9,opt,name=version,proto3" json:"version,omitempty"` // 每次保存后自增，代表 Runtime 加载的版本
 	Status        AgentStatus            `protobuf:"varint,10,opt,name=status,proto3,enum=agenteam.v1.AgentStatus" json:"status,omitempty"`
 	CreatedAt     int64                  `protobuf:"varint,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt     int64                  `protobuf:"varint,12,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Kind          AgentKind              `protobuf:"varint,13,opt,name=kind,proto3,enum=agenteam.v1.AgentKind" json:"kind,omitempty"` // 创建方式：本地 Prompt 驱动 / A2A 协议链接外部 Agent
+	A2AConfig     *A2AConfig             `protobuf:"bytes,14,opt,name=a2a_config,json=a2aConfig,proto3" json:"a2a_config,omitempty"`  // 仅 kind=AGENT_KIND_A2A 时有效
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Agent) Reset() {
 	*x = Agent{}
-	mi := &file_common_proto_msgTypes[0]
+	mi := &file_common_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -160,7 +317,7 @@ func (x *Agent) String() string {
 func (*Agent) ProtoMessage() {}
 
 func (x *Agent) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[0]
+	mi := &file_common_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -173,7 +330,7 @@ func (x *Agent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Agent.ProtoReflect.Descriptor instead.
 func (*Agent) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{0}
+	return file_common_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Agent) GetId() string {
@@ -260,6 +417,20 @@ func (x *Agent) GetUpdatedAt() int64 {
 	return 0
 }
 
+func (x *Agent) GetKind() AgentKind {
+	if x != nil {
+		return x.Kind
+	}
+	return AgentKind_AGENT_KIND_UNSPECIFIED
+}
+
+func (x *Agent) GetA2AConfig() *A2AConfig {
+	if x != nil {
+		return x.A2AConfig
+	}
+	return nil
+}
+
 // 团队，创建时会自动生成一个主 Agent。
 type Team struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -274,7 +445,7 @@ type Team struct {
 
 func (x *Team) Reset() {
 	*x = Team{}
-	mi := &file_common_proto_msgTypes[1]
+	mi := &file_common_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -286,7 +457,7 @@ func (x *Team) String() string {
 func (*Team) ProtoMessage() {}
 
 func (x *Team) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[1]
+	mi := &file_common_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -299,7 +470,7 @@ func (x *Team) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Team.ProtoReflect.Descriptor instead.
 func (*Team) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{1}
+	return file_common_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Team) GetId() string {
@@ -352,7 +523,7 @@ type ChatMessage struct {
 
 func (x *ChatMessage) Reset() {
 	*x = ChatMessage{}
-	mi := &file_common_proto_msgTypes[2]
+	mi := &file_common_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -364,7 +535,7 @@ func (x *ChatMessage) String() string {
 func (*ChatMessage) ProtoMessage() {}
 
 func (x *ChatMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[2]
+	mi := &file_common_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -377,7 +548,7 @@ func (x *ChatMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatMessage.ProtoReflect.Descriptor instead.
 func (*ChatMessage) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{2}
+	return file_common_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ChatMessage) GetId() string {
@@ -435,7 +606,7 @@ type ModelOption struct {
 
 func (x *ModelOption) Reset() {
 	*x = ModelOption{}
-	mi := &file_common_proto_msgTypes[3]
+	mi := &file_common_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -447,7 +618,7 @@ func (x *ModelOption) String() string {
 func (*ModelOption) ProtoMessage() {}
 
 func (x *ModelOption) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[3]
+	mi := &file_common_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -460,7 +631,7 @@ func (x *ModelOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelOption.ProtoReflect.Descriptor instead.
 func (*ModelOption) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{3}
+	return file_common_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ModelOption) GetId() string {
@@ -503,7 +674,7 @@ type ToolOption struct {
 
 func (x *ToolOption) Reset() {
 	*x = ToolOption{}
-	mi := &file_common_proto_msgTypes[4]
+	mi := &file_common_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -515,7 +686,7 @@ func (x *ToolOption) String() string {
 func (*ToolOption) ProtoMessage() {}
 
 func (x *ToolOption) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[4]
+	mi := &file_common_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -528,7 +699,7 @@ func (x *ToolOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolOption.ProtoReflect.Descriptor instead.
 func (*ToolOption) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{4}
+	return file_common_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ToolOption) GetId() string {
@@ -556,7 +727,18 @@ var File_common_proto protoreflect.FileDescriptor
 
 const file_common_proto_rawDesc = "" +
 	"\n" +
-	"\fcommon.proto\x12\vagenteam.v1\"\xca\x02\n" +
+	"\fcommon.proto\x12\vagenteam.v1\"\xb2\x02\n" +
+	"\tA2AConfig\x12!\n" +
+	"\fendpoint_url\x18\x01 \x01(\tR\vendpointUrl\x12\x1f\n" +
+	"\vauth_scheme\x18\x02 \x01(\tR\n" +
+	"authScheme\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x03 \x01(\tR\tauthToken\x12$\n" +
+	"\x0eauth_token_set\x18\x04 \x01(\bR\fauthTokenSet\x12*\n" +
+	"\x11remote_agent_name\x18\x05 \x01(\tR\x0fremoteAgentName\x12-\n" +
+	"\x12remote_description\x18\x06 \x01(\tR\x11remoteDescription\x12#\n" +
+	"\rremote_skills\x18\a \x03(\tR\fremoteSkills\x12\x1c\n" +
+	"\tstreaming\x18\b \x01(\bR\tstreaming\"\xad\x03\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x12\n" +
@@ -572,7 +754,10 @@ const file_common_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\v \x01(\x03R\tcreatedAt\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\f \x01(\x03R\tupdatedAt\"\x8c\x01\n" +
+	"updated_at\x18\f \x01(\x03R\tupdatedAt\x12*\n" +
+	"\x04kind\x18\r \x01(\x0e2\x16.agenteam.v1.AgentKindR\x04kind\x125\n" +
+	"\n" +
+	"a2a_config\x18\x0e \x01(\v2\x16.agenteam.v1.A2AConfigR\ta2aConfig\"\x8c\x01\n" +
 	"\x04Team\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\"\n" +
@@ -603,7 +788,11 @@ const file_common_proto_rawDesc = "" +
 	"\x18AGENT_STATUS_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13AGENT_STATUS_LOADED\x10\x01\x12\x1a\n" +
 	"\x16AGENT_STATUS_RELOADING\x10\x02\x12\x16\n" +
-	"\x12AGENT_STATUS_ERROR\x10\x03*s\n" +
+	"\x12AGENT_STATUS_ERROR\x10\x03*R\n" +
+	"\tAgentKind\x12\x1a\n" +
+	"\x16AGENT_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11AGENT_KIND_PROMPT\x10\x01\x12\x12\n" +
+	"\x0eAGENT_KIND_A2A\x10\x02*s\n" +
 	"\vMessageRole\x12\x1c\n" +
 	"\x18MESSAGE_ROLE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11MESSAGE_ROLE_USER\x10\x01\x12\x16\n" +
@@ -622,25 +811,29 @@ func file_common_proto_rawDescGZIP() []byte {
 	return file_common_proto_rawDescData
 }
 
-var file_common_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_common_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_common_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_common_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_common_proto_goTypes = []any{
 	(AgentStatus)(0),    // 0: agenteam.v1.AgentStatus
-	(MessageRole)(0),    // 1: agenteam.v1.MessageRole
-	(*Agent)(nil),       // 2: agenteam.v1.Agent
-	(*Team)(nil),        // 3: agenteam.v1.Team
-	(*ChatMessage)(nil), // 4: agenteam.v1.ChatMessage
-	(*ModelOption)(nil), // 5: agenteam.v1.ModelOption
-	(*ToolOption)(nil),  // 6: agenteam.v1.ToolOption
+	(AgentKind)(0),      // 1: agenteam.v1.AgentKind
+	(MessageRole)(0),    // 2: agenteam.v1.MessageRole
+	(*A2AConfig)(nil),   // 3: agenteam.v1.A2AConfig
+	(*Agent)(nil),       // 4: agenteam.v1.Agent
+	(*Team)(nil),        // 5: agenteam.v1.Team
+	(*ChatMessage)(nil), // 6: agenteam.v1.ChatMessage
+	(*ModelOption)(nil), // 7: agenteam.v1.ModelOption
+	(*ToolOption)(nil),  // 8: agenteam.v1.ToolOption
 }
 var file_common_proto_depIdxs = []int32{
 	0, // 0: agenteam.v1.Agent.status:type_name -> agenteam.v1.AgentStatus
-	1, // 1: agenteam.v1.ChatMessage.role:type_name -> agenteam.v1.MessageRole
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	1, // 1: agenteam.v1.Agent.kind:type_name -> agenteam.v1.AgentKind
+	3, // 2: agenteam.v1.Agent.a2a_config:type_name -> agenteam.v1.A2AConfig
+	2, // 3: agenteam.v1.ChatMessage.role:type_name -> agenteam.v1.MessageRole
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_common_proto_init() }
@@ -653,8 +846,8 @@ func file_common_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_common_proto_rawDesc), len(file_common_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   5,
+			NumEnums:      3,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

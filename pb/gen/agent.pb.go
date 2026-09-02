@@ -202,10 +202,12 @@ type CreateAgentRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Prompt        string                 `protobuf:"bytes,3,opt,name=prompt,proto3" json:"prompt,omitempty"`
-	Model         string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
+	Prompt        string                 `protobuf:"bytes,3,opt,name=prompt,proto3" json:"prompt,omitempty"` // kind=AGENT_KIND_PROMPT 时必填
+	Model         string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`   // kind=AGENT_KIND_PROMPT 时必填
 	McpTools      []string               `protobuf:"bytes,5,rep,name=mcp_tools,json=mcpTools,proto3" json:"mcp_tools,omitempty"`
 	Skills        []string               `protobuf:"bytes,6,rep,name=skills,proto3" json:"skills,omitempty"`
+	Kind          AgentKind              `protobuf:"varint,7,opt,name=kind,proto3,enum=agenteam.v1.AgentKind" json:"kind,omitempty"` // 默认 AGENT_KIND_PROMPT（未指定时按 Prompt 方式创建，兼容旧客户端）
+	A2AConfig     *A2AConfig             `protobuf:"bytes,8,opt,name=a2a_config,json=a2aConfig,proto3" json:"a2a_config,omitempty"`  // kind=AGENT_KIND_A2A 时必填（至少填 endpoint_url）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -282,6 +284,20 @@ func (x *CreateAgentRequest) GetSkills() []string {
 	return nil
 }
 
+func (x *CreateAgentRequest) GetKind() AgentKind {
+	if x != nil {
+		return x.Kind
+	}
+	return AgentKind_AGENT_KIND_UNSPECIFIED
+}
+
+func (x *CreateAgentRequest) GetA2AConfig() *A2AConfig {
+	if x != nil {
+		return x.A2AConfig
+	}
+	return nil
+}
+
 type CreateAgentResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Agent         *Agent                 `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
@@ -326,6 +342,134 @@ func (x *CreateAgentResponse) GetAgent() *Agent {
 	return nil
 }
 
+type DiscoverA2AAgentRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EndpointUrl   string                 `protobuf:"bytes,1,opt,name=endpoint_url,json=endpointUrl,proto3" json:"endpoint_url,omitempty"`
+	AuthScheme    string                 `protobuf:"bytes,2,opt,name=auth_scheme,json=authScheme,proto3" json:"auth_scheme,omitempty"`
+	AuthToken     string                 `protobuf:"bytes,3,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DiscoverA2AAgentRequest) Reset() {
+	*x = DiscoverA2AAgentRequest{}
+	mi := &file_agent_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiscoverA2AAgentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiscoverA2AAgentRequest) ProtoMessage() {}
+
+func (x *DiscoverA2AAgentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiscoverA2AAgentRequest.ProtoReflect.Descriptor instead.
+func (*DiscoverA2AAgentRequest) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *DiscoverA2AAgentRequest) GetEndpointUrl() string {
+	if x != nil {
+		return x.EndpointUrl
+	}
+	return ""
+}
+
+func (x *DiscoverA2AAgentRequest) GetAuthScheme() string {
+	if x != nil {
+		return x.AuthScheme
+	}
+	return ""
+}
+
+func (x *DiscoverA2AAgentRequest) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+type DiscoverA2AAgentResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	RemoteAgentName   string                 `protobuf:"bytes,1,opt,name=remote_agent_name,json=remoteAgentName,proto3" json:"remote_agent_name,omitempty"`
+	RemoteDescription string                 `protobuf:"bytes,2,opt,name=remote_description,json=remoteDescription,proto3" json:"remote_description,omitempty"`
+	RemoteSkills      []string               `protobuf:"bytes,3,rep,name=remote_skills,json=remoteSkills,proto3" json:"remote_skills,omitempty"`
+	Streaming         bool                   `protobuf:"varint,4,opt,name=streaming,proto3" json:"streaming,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *DiscoverA2AAgentResponse) Reset() {
+	*x = DiscoverA2AAgentResponse{}
+	mi := &file_agent_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiscoverA2AAgentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiscoverA2AAgentResponse) ProtoMessage() {}
+
+func (x *DiscoverA2AAgentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiscoverA2AAgentResponse.ProtoReflect.Descriptor instead.
+func (*DiscoverA2AAgentResponse) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *DiscoverA2AAgentResponse) GetRemoteAgentName() string {
+	if x != nil {
+		return x.RemoteAgentName
+	}
+	return ""
+}
+
+func (x *DiscoverA2AAgentResponse) GetRemoteDescription() string {
+	if x != nil {
+		return x.RemoteDescription
+	}
+	return ""
+}
+
+func (x *DiscoverA2AAgentResponse) GetRemoteSkills() []string {
+	if x != nil {
+		return x.RemoteSkills
+	}
+	return nil
+}
+
+func (x *DiscoverA2AAgentResponse) GetStreaming() bool {
+	if x != nil {
+		return x.Streaming
+	}
+	return false
+}
+
 type UpdateAgentRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -334,13 +478,14 @@ type UpdateAgentRequest struct {
 	Model         string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
 	McpTools      []string               `protobuf:"bytes,5,rep,name=mcp_tools,json=mcpTools,proto3" json:"mcp_tools,omitempty"`
 	Skills        []string               `protobuf:"bytes,6,rep,name=skills,proto3" json:"skills,omitempty"`
+	A2AConfig     *A2AConfig             `protobuf:"bytes,7,opt,name=a2a_config,json=a2aConfig,proto3" json:"a2a_config,omitempty"` // kind=AGENT_KIND_A2A 的 Agent 通过本字段更新接入配置；
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateAgentRequest) Reset() {
 	*x = UpdateAgentRequest{}
-	mi := &file_agent_proto_msgTypes[6]
+	mi := &file_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -352,7 +497,7 @@ func (x *UpdateAgentRequest) String() string {
 func (*UpdateAgentRequest) ProtoMessage() {}
 
 func (x *UpdateAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[6]
+	mi := &file_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -365,7 +510,7 @@ func (x *UpdateAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateAgentRequest.ProtoReflect.Descriptor instead.
 func (*UpdateAgentRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{6}
+	return file_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *UpdateAgentRequest) GetId() string {
@@ -410,6 +555,13 @@ func (x *UpdateAgentRequest) GetSkills() []string {
 	return nil
 }
 
+func (x *UpdateAgentRequest) GetA2AConfig() *A2AConfig {
+	if x != nil {
+		return x.A2AConfig
+	}
+	return nil
+}
+
 type UpdateAgentResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Agent         *Agent                 `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
@@ -419,7 +571,7 @@ type UpdateAgentResponse struct {
 
 func (x *UpdateAgentResponse) Reset() {
 	*x = UpdateAgentResponse{}
-	mi := &file_agent_proto_msgTypes[7]
+	mi := &file_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -431,7 +583,7 @@ func (x *UpdateAgentResponse) String() string {
 func (*UpdateAgentResponse) ProtoMessage() {}
 
 func (x *UpdateAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[7]
+	mi := &file_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -444,7 +596,7 @@ func (x *UpdateAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateAgentResponse.ProtoReflect.Descriptor instead.
 func (*UpdateAgentResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{7}
+	return file_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UpdateAgentResponse) GetAgent() *Agent {
@@ -463,7 +615,7 @@ type DeleteAgentRequest struct {
 
 func (x *DeleteAgentRequest) Reset() {
 	*x = DeleteAgentRequest{}
-	mi := &file_agent_proto_msgTypes[8]
+	mi := &file_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -475,7 +627,7 @@ func (x *DeleteAgentRequest) String() string {
 func (*DeleteAgentRequest) ProtoMessage() {}
 
 func (x *DeleteAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[8]
+	mi := &file_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -488,7 +640,7 @@ func (x *DeleteAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteAgentRequest.ProtoReflect.Descriptor instead.
 func (*DeleteAgentRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{8}
+	return file_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DeleteAgentRequest) GetId() string {
@@ -506,7 +658,7 @@ type DeleteAgentResponse struct {
 
 func (x *DeleteAgentResponse) Reset() {
 	*x = DeleteAgentResponse{}
-	mi := &file_agent_proto_msgTypes[9]
+	mi := &file_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -518,7 +670,7 @@ func (x *DeleteAgentResponse) String() string {
 func (*DeleteAgentResponse) ProtoMessage() {}
 
 func (x *DeleteAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[9]
+	mi := &file_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -531,7 +683,7 @@ func (x *DeleteAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteAgentResponse.ProtoReflect.Descriptor instead.
 func (*DeleteAgentResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{9}
+	return file_agent_proto_rawDescGZIP(), []int{11}
 }
 
 type ListModelOptionsRequest struct {
@@ -542,7 +694,7 @@ type ListModelOptionsRequest struct {
 
 func (x *ListModelOptionsRequest) Reset() {
 	*x = ListModelOptionsRequest{}
-	mi := &file_agent_proto_msgTypes[10]
+	mi := &file_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -554,7 +706,7 @@ func (x *ListModelOptionsRequest) String() string {
 func (*ListModelOptionsRequest) ProtoMessage() {}
 
 func (x *ListModelOptionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[10]
+	mi := &file_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -567,7 +719,7 @@ func (x *ListModelOptionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModelOptionsRequest.ProtoReflect.Descriptor instead.
 func (*ListModelOptionsRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{10}
+	return file_agent_proto_rawDescGZIP(), []int{12}
 }
 
 type ListModelOptionsResponse struct {
@@ -579,7 +731,7 @@ type ListModelOptionsResponse struct {
 
 func (x *ListModelOptionsResponse) Reset() {
 	*x = ListModelOptionsResponse{}
-	mi := &file_agent_proto_msgTypes[11]
+	mi := &file_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -591,7 +743,7 @@ func (x *ListModelOptionsResponse) String() string {
 func (*ListModelOptionsResponse) ProtoMessage() {}
 
 func (x *ListModelOptionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[11]
+	mi := &file_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -604,7 +756,7 @@ func (x *ListModelOptionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModelOptionsResponse.ProtoReflect.Descriptor instead.
 func (*ListModelOptionsResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{11}
+	return file_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ListModelOptionsResponse) GetModels() []*ModelOption {
@@ -622,7 +774,7 @@ type ListMcpToolOptionsRequest struct {
 
 func (x *ListMcpToolOptionsRequest) Reset() {
 	*x = ListMcpToolOptionsRequest{}
-	mi := &file_agent_proto_msgTypes[12]
+	mi := &file_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -634,7 +786,7 @@ func (x *ListMcpToolOptionsRequest) String() string {
 func (*ListMcpToolOptionsRequest) ProtoMessage() {}
 
 func (x *ListMcpToolOptionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[12]
+	mi := &file_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -647,7 +799,7 @@ func (x *ListMcpToolOptionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMcpToolOptionsRequest.ProtoReflect.Descriptor instead.
 func (*ListMcpToolOptionsRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{12}
+	return file_agent_proto_rawDescGZIP(), []int{14}
 }
 
 type ListMcpToolOptionsResponse struct {
@@ -659,7 +811,7 @@ type ListMcpToolOptionsResponse struct {
 
 func (x *ListMcpToolOptionsResponse) Reset() {
 	*x = ListMcpToolOptionsResponse{}
-	mi := &file_agent_proto_msgTypes[13]
+	mi := &file_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -671,7 +823,7 @@ func (x *ListMcpToolOptionsResponse) String() string {
 func (*ListMcpToolOptionsResponse) ProtoMessage() {}
 
 func (x *ListMcpToolOptionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[13]
+	mi := &file_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -684,7 +836,7 @@ func (x *ListMcpToolOptionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMcpToolOptionsResponse.ProtoReflect.Descriptor instead.
 func (*ListMcpToolOptionsResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{13}
+	return file_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ListMcpToolOptionsResponse) GetTools() []*ToolOption {
@@ -702,7 +854,7 @@ type ListSkillOptionsRequest struct {
 
 func (x *ListSkillOptionsRequest) Reset() {
 	*x = ListSkillOptionsRequest{}
-	mi := &file_agent_proto_msgTypes[14]
+	mi := &file_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -714,7 +866,7 @@ func (x *ListSkillOptionsRequest) String() string {
 func (*ListSkillOptionsRequest) ProtoMessage() {}
 
 func (x *ListSkillOptionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[14]
+	mi := &file_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -727,7 +879,7 @@ func (x *ListSkillOptionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSkillOptionsRequest.ProtoReflect.Descriptor instead.
 func (*ListSkillOptionsRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{14}
+	return file_agent_proto_rawDescGZIP(), []int{16}
 }
 
 type ListSkillOptionsResponse struct {
@@ -739,7 +891,7 @@ type ListSkillOptionsResponse struct {
 
 func (x *ListSkillOptionsResponse) Reset() {
 	*x = ListSkillOptionsResponse{}
-	mi := &file_agent_proto_msgTypes[15]
+	mi := &file_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -751,7 +903,7 @@ func (x *ListSkillOptionsResponse) String() string {
 func (*ListSkillOptionsResponse) ProtoMessage() {}
 
 func (x *ListSkillOptionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[15]
+	mi := &file_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -764,7 +916,7 @@ func (x *ListSkillOptionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSkillOptionsResponse.ProtoReflect.Descriptor instead.
 func (*ListSkillOptionsResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{15}
+	return file_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListSkillOptionsResponse) GetSkills() []*ToolOption {
@@ -786,23 +938,39 @@ const file_agent_proto_rawDesc = "" +
 	"\x11ListAgentsRequest\x12\x17\n" +
 	"\ateam_id\x18\x01 \x01(\tR\x06teamId\"@\n" +
 	"\x12ListAgentsResponse\x12*\n" +
-	"\x06agents\x18\x01 \x03(\v2\x12.agenteam.v1.AgentR\x06agents\"\xa4\x01\n" +
+	"\x06agents\x18\x01 \x03(\v2\x12.agenteam.v1.AgentR\x06agents\"\x87\x02\n" +
 	"\x12CreateAgentRequest\x12\x17\n" +
 	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06prompt\x18\x03 \x01(\tR\x06prompt\x12\x14\n" +
 	"\x05model\x18\x04 \x01(\tR\x05model\x12\x1b\n" +
 	"\tmcp_tools\x18\x05 \x03(\tR\bmcpTools\x12\x16\n" +
-	"\x06skills\x18\x06 \x03(\tR\x06skills\"?\n" +
+	"\x06skills\x18\x06 \x03(\tR\x06skills\x12*\n" +
+	"\x04kind\x18\a \x01(\x0e2\x16.agenteam.v1.AgentKindR\x04kind\x125\n" +
+	"\n" +
+	"a2a_config\x18\b \x01(\v2\x16.agenteam.v1.A2AConfigR\ta2aConfig\"?\n" +
 	"\x13CreateAgentResponse\x12(\n" +
-	"\x05agent\x18\x01 \x01(\v2\x12.agenteam.v1.AgentR\x05agent\"\x9b\x01\n" +
+	"\x05agent\x18\x01 \x01(\v2\x12.agenteam.v1.AgentR\x05agent\"|\n" +
+	"\x17DiscoverA2AAgentRequest\x12!\n" +
+	"\fendpoint_url\x18\x01 \x01(\tR\vendpointUrl\x12\x1f\n" +
+	"\vauth_scheme\x18\x02 \x01(\tR\n" +
+	"authScheme\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x03 \x01(\tR\tauthToken\"\xb8\x01\n" +
+	"\x18DiscoverA2AAgentResponse\x12*\n" +
+	"\x11remote_agent_name\x18\x01 \x01(\tR\x0fremoteAgentName\x12-\n" +
+	"\x12remote_description\x18\x02 \x01(\tR\x11remoteDescription\x12#\n" +
+	"\rremote_skills\x18\x03 \x03(\tR\fremoteSkills\x12\x1c\n" +
+	"\tstreaming\x18\x04 \x01(\bR\tstreaming\"\xd2\x01\n" +
 	"\x12UpdateAgentRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06prompt\x18\x03 \x01(\tR\x06prompt\x12\x14\n" +
 	"\x05model\x18\x04 \x01(\tR\x05model\x12\x1b\n" +
 	"\tmcp_tools\x18\x05 \x03(\tR\bmcpTools\x12\x16\n" +
-	"\x06skills\x18\x06 \x03(\tR\x06skills\"?\n" +
+	"\x06skills\x18\x06 \x03(\tR\x06skills\x125\n" +
+	"\n" +
+	"a2a_config\x18\a \x01(\v2\x16.agenteam.v1.A2AConfigR\ta2aConfig\"?\n" +
 	"\x13UpdateAgentResponse\x12(\n" +
 	"\x05agent\x18\x01 \x01(\v2\x12.agenteam.v1.AgentR\x05agent\"$\n" +
 	"\x12DeleteAgentRequest\x12\x0e\n" +
@@ -816,12 +984,13 @@ const file_agent_proto_rawDesc = "" +
 	"\x05tools\x18\x01 \x03(\v2\x17.agenteam.v1.ToolOptionR\x05tools\"\x19\n" +
 	"\x17ListSkillOptionsRequest\"K\n" +
 	"\x18ListSkillOptionsResponse\x12/\n" +
-	"\x06skills\x18\x01 \x03(\v2\x17.agenteam.v1.ToolOptionR\x06skills2\xb6\a\n" +
+	"\x06skills\x18\x01 \x03(\v2\x17.agenteam.v1.ToolOptionR\x06skills2\xb4\b\n" +
 	"\fAgentService\x12`\n" +
 	"\bGetAgent\x12\x1c.agenteam.v1.GetAgentRequest\x1a\x1d.agenteam.v1.GetAgentResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/agents/{id}\x12q\n" +
 	"\n" +
 	"ListAgents\x12\x1e.agenteam.v1.ListAgentsRequest\x1a\x1f.agenteam.v1.ListAgentsResponse\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/teams/{team_id}/agents\x12w\n" +
-	"\vCreateAgent\x12\x1f.agenteam.v1.CreateAgentRequest\x1a .agenteam.v1.CreateAgentResponse\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1/teams/{team_id}/agents\x12l\n" +
+	"\vCreateAgent\x12\x1f.agenteam.v1.CreateAgentRequest\x1a .agenteam.v1.CreateAgentResponse\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1/teams/{team_id}/agents\x12|\n" +
+	"\x10DiscoverA2AAgent\x12$.agenteam.v1.DiscoverA2AAgentRequest\x1a%.agenteam.v1.DiscoverA2AAgentResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/v1/a2a/discover\x12l\n" +
 	"\vUpdateAgent\x12\x1f.agenteam.v1.UpdateAgentRequest\x1a .agenteam.v1.UpdateAgentResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\x1a\x0f/v1/agents/{id}\x12i\n" +
 	"\vDeleteAgent\x12\x1f.agenteam.v1.DeleteAgentRequest\x1a .agenteam.v1.DeleteAgentResponse\"\x17\x82\xd3\xe4\x93\x02\x11*\x0f/v1/agents/{id}\x12{\n" +
 	"\x10ListModelOptions\x12$.agenteam.v1.ListModelOptionsRequest\x1a%.agenteam.v1.ListModelOptionsResponse\"\x1a\x82\xd3\xe4\x93\x02\x14\x12\x12/v1/options/models\x12\x84\x01\n" +
@@ -840,7 +1009,7 @@ func file_agent_proto_rawDescGZIP() []byte {
 	return file_agent_proto_rawDescData
 }
 
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_agent_proto_goTypes = []any{
 	(*GetAgentRequest)(nil),            // 0: agenteam.v1.GetAgentRequest
 	(*GetAgentResponse)(nil),           // 1: agenteam.v1.GetAgentResponse
@@ -848,49 +1017,58 @@ var file_agent_proto_goTypes = []any{
 	(*ListAgentsResponse)(nil),         // 3: agenteam.v1.ListAgentsResponse
 	(*CreateAgentRequest)(nil),         // 4: agenteam.v1.CreateAgentRequest
 	(*CreateAgentResponse)(nil),        // 5: agenteam.v1.CreateAgentResponse
-	(*UpdateAgentRequest)(nil),         // 6: agenteam.v1.UpdateAgentRequest
-	(*UpdateAgentResponse)(nil),        // 7: agenteam.v1.UpdateAgentResponse
-	(*DeleteAgentRequest)(nil),         // 8: agenteam.v1.DeleteAgentRequest
-	(*DeleteAgentResponse)(nil),        // 9: agenteam.v1.DeleteAgentResponse
-	(*ListModelOptionsRequest)(nil),    // 10: agenteam.v1.ListModelOptionsRequest
-	(*ListModelOptionsResponse)(nil),   // 11: agenteam.v1.ListModelOptionsResponse
-	(*ListMcpToolOptionsRequest)(nil),  // 12: agenteam.v1.ListMcpToolOptionsRequest
-	(*ListMcpToolOptionsResponse)(nil), // 13: agenteam.v1.ListMcpToolOptionsResponse
-	(*ListSkillOptionsRequest)(nil),    // 14: agenteam.v1.ListSkillOptionsRequest
-	(*ListSkillOptionsResponse)(nil),   // 15: agenteam.v1.ListSkillOptionsResponse
-	(*Agent)(nil),                      // 16: agenteam.v1.Agent
-	(*ModelOption)(nil),                // 17: agenteam.v1.ModelOption
-	(*ToolOption)(nil),                 // 18: agenteam.v1.ToolOption
+	(*DiscoverA2AAgentRequest)(nil),    // 6: agenteam.v1.DiscoverA2AAgentRequest
+	(*DiscoverA2AAgentResponse)(nil),   // 7: agenteam.v1.DiscoverA2AAgentResponse
+	(*UpdateAgentRequest)(nil),         // 8: agenteam.v1.UpdateAgentRequest
+	(*UpdateAgentResponse)(nil),        // 9: agenteam.v1.UpdateAgentResponse
+	(*DeleteAgentRequest)(nil),         // 10: agenteam.v1.DeleteAgentRequest
+	(*DeleteAgentResponse)(nil),        // 11: agenteam.v1.DeleteAgentResponse
+	(*ListModelOptionsRequest)(nil),    // 12: agenteam.v1.ListModelOptionsRequest
+	(*ListModelOptionsResponse)(nil),   // 13: agenteam.v1.ListModelOptionsResponse
+	(*ListMcpToolOptionsRequest)(nil),  // 14: agenteam.v1.ListMcpToolOptionsRequest
+	(*ListMcpToolOptionsResponse)(nil), // 15: agenteam.v1.ListMcpToolOptionsResponse
+	(*ListSkillOptionsRequest)(nil),    // 16: agenteam.v1.ListSkillOptionsRequest
+	(*ListSkillOptionsResponse)(nil),   // 17: agenteam.v1.ListSkillOptionsResponse
+	(*Agent)(nil),                      // 18: agenteam.v1.Agent
+	(AgentKind)(0),                     // 19: agenteam.v1.AgentKind
+	(*A2AConfig)(nil),                  // 20: agenteam.v1.A2AConfig
+	(*ModelOption)(nil),                // 21: agenteam.v1.ModelOption
+	(*ToolOption)(nil),                 // 22: agenteam.v1.ToolOption
 }
 var file_agent_proto_depIdxs = []int32{
-	16, // 0: agenteam.v1.GetAgentResponse.agent:type_name -> agenteam.v1.Agent
-	16, // 1: agenteam.v1.ListAgentsResponse.agents:type_name -> agenteam.v1.Agent
-	16, // 2: agenteam.v1.CreateAgentResponse.agent:type_name -> agenteam.v1.Agent
-	16, // 3: agenteam.v1.UpdateAgentResponse.agent:type_name -> agenteam.v1.Agent
-	17, // 4: agenteam.v1.ListModelOptionsResponse.models:type_name -> agenteam.v1.ModelOption
-	18, // 5: agenteam.v1.ListMcpToolOptionsResponse.tools:type_name -> agenteam.v1.ToolOption
-	18, // 6: agenteam.v1.ListSkillOptionsResponse.skills:type_name -> agenteam.v1.ToolOption
-	0,  // 7: agenteam.v1.AgentService.GetAgent:input_type -> agenteam.v1.GetAgentRequest
-	2,  // 8: agenteam.v1.AgentService.ListAgents:input_type -> agenteam.v1.ListAgentsRequest
-	4,  // 9: agenteam.v1.AgentService.CreateAgent:input_type -> agenteam.v1.CreateAgentRequest
-	6,  // 10: agenteam.v1.AgentService.UpdateAgent:input_type -> agenteam.v1.UpdateAgentRequest
-	8,  // 11: agenteam.v1.AgentService.DeleteAgent:input_type -> agenteam.v1.DeleteAgentRequest
-	10, // 12: agenteam.v1.AgentService.ListModelOptions:input_type -> agenteam.v1.ListModelOptionsRequest
-	12, // 13: agenteam.v1.AgentService.ListMcpToolOptions:input_type -> agenteam.v1.ListMcpToolOptionsRequest
-	14, // 14: agenteam.v1.AgentService.ListSkillOptions:input_type -> agenteam.v1.ListSkillOptionsRequest
-	1,  // 15: agenteam.v1.AgentService.GetAgent:output_type -> agenteam.v1.GetAgentResponse
-	3,  // 16: agenteam.v1.AgentService.ListAgents:output_type -> agenteam.v1.ListAgentsResponse
-	5,  // 17: agenteam.v1.AgentService.CreateAgent:output_type -> agenteam.v1.CreateAgentResponse
-	7,  // 18: agenteam.v1.AgentService.UpdateAgent:output_type -> agenteam.v1.UpdateAgentResponse
-	9,  // 19: agenteam.v1.AgentService.DeleteAgent:output_type -> agenteam.v1.DeleteAgentResponse
-	11, // 20: agenteam.v1.AgentService.ListModelOptions:output_type -> agenteam.v1.ListModelOptionsResponse
-	13, // 21: agenteam.v1.AgentService.ListMcpToolOptions:output_type -> agenteam.v1.ListMcpToolOptionsResponse
-	15, // 22: agenteam.v1.AgentService.ListSkillOptions:output_type -> agenteam.v1.ListSkillOptionsResponse
-	15, // [15:23] is the sub-list for method output_type
-	7,  // [7:15] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	18, // 0: agenteam.v1.GetAgentResponse.agent:type_name -> agenteam.v1.Agent
+	18, // 1: agenteam.v1.ListAgentsResponse.agents:type_name -> agenteam.v1.Agent
+	19, // 2: agenteam.v1.CreateAgentRequest.kind:type_name -> agenteam.v1.AgentKind
+	20, // 3: agenteam.v1.CreateAgentRequest.a2a_config:type_name -> agenteam.v1.A2AConfig
+	18, // 4: agenteam.v1.CreateAgentResponse.agent:type_name -> agenteam.v1.Agent
+	20, // 5: agenteam.v1.UpdateAgentRequest.a2a_config:type_name -> agenteam.v1.A2AConfig
+	18, // 6: agenteam.v1.UpdateAgentResponse.agent:type_name -> agenteam.v1.Agent
+	21, // 7: agenteam.v1.ListModelOptionsResponse.models:type_name -> agenteam.v1.ModelOption
+	22, // 8: agenteam.v1.ListMcpToolOptionsResponse.tools:type_name -> agenteam.v1.ToolOption
+	22, // 9: agenteam.v1.ListSkillOptionsResponse.skills:type_name -> agenteam.v1.ToolOption
+	0,  // 10: agenteam.v1.AgentService.GetAgent:input_type -> agenteam.v1.GetAgentRequest
+	2,  // 11: agenteam.v1.AgentService.ListAgents:input_type -> agenteam.v1.ListAgentsRequest
+	4,  // 12: agenteam.v1.AgentService.CreateAgent:input_type -> agenteam.v1.CreateAgentRequest
+	6,  // 13: agenteam.v1.AgentService.DiscoverA2AAgent:input_type -> agenteam.v1.DiscoverA2AAgentRequest
+	8,  // 14: agenteam.v1.AgentService.UpdateAgent:input_type -> agenteam.v1.UpdateAgentRequest
+	10, // 15: agenteam.v1.AgentService.DeleteAgent:input_type -> agenteam.v1.DeleteAgentRequest
+	12, // 16: agenteam.v1.AgentService.ListModelOptions:input_type -> agenteam.v1.ListModelOptionsRequest
+	14, // 17: agenteam.v1.AgentService.ListMcpToolOptions:input_type -> agenteam.v1.ListMcpToolOptionsRequest
+	16, // 18: agenteam.v1.AgentService.ListSkillOptions:input_type -> agenteam.v1.ListSkillOptionsRequest
+	1,  // 19: agenteam.v1.AgentService.GetAgent:output_type -> agenteam.v1.GetAgentResponse
+	3,  // 20: agenteam.v1.AgentService.ListAgents:output_type -> agenteam.v1.ListAgentsResponse
+	5,  // 21: agenteam.v1.AgentService.CreateAgent:output_type -> agenteam.v1.CreateAgentResponse
+	7,  // 22: agenteam.v1.AgentService.DiscoverA2AAgent:output_type -> agenteam.v1.DiscoverA2AAgentResponse
+	9,  // 23: agenteam.v1.AgentService.UpdateAgent:output_type -> agenteam.v1.UpdateAgentResponse
+	11, // 24: agenteam.v1.AgentService.DeleteAgent:output_type -> agenteam.v1.DeleteAgentResponse
+	13, // 25: agenteam.v1.AgentService.ListModelOptions:output_type -> agenteam.v1.ListModelOptionsResponse
+	15, // 26: agenteam.v1.AgentService.ListMcpToolOptions:output_type -> agenteam.v1.ListMcpToolOptionsResponse
+	17, // 27: agenteam.v1.AgentService.ListSkillOptions:output_type -> agenteam.v1.ListSkillOptionsResponse
+	19, // [19:28] is the sub-list for method output_type
+	10, // [10:19] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -905,7 +1083,7 @@ func file_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -12,6 +12,13 @@ enum AgentStatus {
   AGENT_STATUS_ERROR = 3;     // 加载失败
 }
 
+// Agent 的创建/接入方式。
+enum AgentKind {
+  AGENT_KIND_UNSPECIFIED = 0;
+  AGENT_KIND_PROMPT = 1; // 平台内置：本地 Prompt + LLM 驱动（原有的唯一方式）
+  AGENT_KIND_A2A = 2;    // 通过 A2A（Agent2Agent）协议链接一个外部 Agent 提供方
+}
+
 // 消息发送角色
 enum MessageRole {
   MESSAGE_ROLE_UNSPECIFIED = 0;
@@ -20,20 +27,38 @@ enum MessageRole {
   MESSAGE_ROLE_SYSTEM = 3;
 }
 
+// A2A（Agent2Agent）协议接入配置：把一个符合 A2A 协议的外部 Agent 接入为平台内的一个 Agent。
+// 接入时后端会向 endpoint_url 发起 Agent Card 发现请求（GET {endpoint_url}/.well-known/agent-card.json），
+// 校验对端可达并回填 remote_* 只读字段，供前端展示对端的真实能力。
+message A2AConfig {
+  string endpoint_url = 1;  // 外部 Agent 的服务地址（Agent Card 中 AgentInterface.url，或其 base url）
+  string auth_scheme = 2;   // 鉴权方式，目前支持: ""（无）/ "bearer"
+  string auth_token = 3;    // 鉴权凭证（如 Bearer Token）。写入专用：仅出现在
+                             // CreateAgent/UpdateAgent 请求中；服务端任何响应都不会回显真实值
+                             // （见 auth_token_set），避免密钥泄露给前端。
+  bool auth_token_set = 4;  // 只读：标记当前是否已配置鉴权凭证（不回显具体值）
+  string remote_agent_name = 5;    // 只读：从对端 Agent Card 中获取到的名称
+  string remote_description = 6;   // 只读：从对端 Agent Card 中获取到的描述
+  repeated string remote_skills = 7; // 只读：对端 Agent Card 声明的技能名称列表
+  bool streaming = 8;               // 只读：对端 Agent Card 中 capabilities.streaming 声明
+}
+
 // Agent 是团队中的最小执行单元，目前每个团队自动拥有一个主 Agent。
 message Agent {
   string id = 1;
   string team_id = 2;
   string name = 3;
   string prompt = 4;
-  string model = 5;             // 对应 ModelOption.id
-  repeated string mcp_tools = 6; // 对应 ToolOption.id 列表
-  repeated string skills = 7;    // 对应 SkillOption.id 列表
+  string model = 5;             // 对应 ModelOption.id；仅 kind=AGENT_KIND_PROMPT 时有效
+  repeated string mcp_tools = 6; // 对应 ToolOption.id 列表；仅 kind=AGENT_KIND_PROMPT 时有效
+  repeated string skills = 7;    // 对应 SkillOption.id 列表；仅 kind=AGENT_KIND_PROMPT 时有效
   bool is_main = 8;
   int64 version = 9;             // 每次保存后自增，代表 Runtime 加载的版本
   AgentStatus status = 10;
   int64 created_at = 11;
   int64 updated_at = 12;
+  AgentKind kind = 13;            // 创建方式：本地 Prompt 驱动 / A2A 协议链接外部 Agent
+  A2AConfig a2a_config = 14;       // 仅 kind=AGENT_KIND_A2A 时有效
 }
 
 // 团队，创建时会自动生成一个主 Agent。

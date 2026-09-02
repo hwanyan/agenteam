@@ -2,6 +2,7 @@
 package service
 
 import (
+	"github.com/hwanyan/agenteam/internal/a2a"
 	"github.com/hwanyan/agenteam/internal/llm"
 	"github.com/hwanyan/agenteam/internal/runtime"
 	"github.com/hwanyan/agenteam/internal/store"
@@ -12,4 +13,5 @@ type Deps struct {
 	Store   store.Store
 	Runtime *runtime.Manager
 	LLM     llm.Client
+	A2A     *a2a.Client
 }

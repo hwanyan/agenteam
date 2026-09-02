@@ -22,6 +22,7 @@ const (
 	AgentService_GetAgent_FullMethodName           = "/agenteam.v1.AgentService/GetAgent"
 	AgentService_ListAgents_FullMethodName         = "/agenteam.v1.AgentService/ListAgents"
 	AgentService_CreateAgent_FullMethodName        = "/agenteam.v1.AgentService/CreateAgent"
+	AgentService_DiscoverA2AAgent_FullMethodName   = "/agenteam.v1.AgentService/DiscoverA2AAgent"
 	AgentService_UpdateAgent_FullMethodName        = "/agenteam.v1.AgentService/UpdateAgent"
 	AgentService_DeleteAgent_FullMethodName        = "/agenteam.v1.AgentService/DeleteAgent"
 	AgentService_ListModelOptions_FullMethodName   = "/agenteam.v1.AgentService/ListModelOptions"
@@ -41,6 +42,10 @@ type AgentServiceClient interface {
 	ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error)
 	// 在指定团队下创建一个新的非主 Agent，并触发服务端加载。
 	CreateAgent(ctx context.Context, in *CreateAgentRequest, opts ...grpc.CallOption) (*CreateAgentResponse, error)
+	// 探测一个 A2A（Agent2Agent）协议的外部 Agent：向 endpoint_url 发起 Agent Card
+	// 发现请求，返回对端名称/描述/技能/是否支持流式等信息，供前端在正式创建/保存前
+	// 预览与校验连通性，不产生任何持久化副作用。
+	DiscoverA2AAgent(ctx context.Context, in *DiscoverA2AAgentRequest, opts ...grpc.CallOption) (*DiscoverA2AAgentResponse, error)
 	// 保存 Agent 配置并触发服务端重新加载该 Agent。
 	UpdateAgent(ctx context.Context, in *UpdateAgentRequest, opts ...grpc.CallOption) (*UpdateAgentResponse, error)
 	// 删除一个非主 Agent；主 Agent（团队创建时自动生成）不可删除，
@@ -83,6 +88,16 @@ func (c *agentServiceClient) CreateAgent(ctx context.Context, in *CreateAgentReq
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateAgentResponse)
 	err := c.cc.Invoke(ctx, AgentService_CreateAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) DiscoverA2AAgent(ctx context.Context, in *DiscoverA2AAgentRequest, opts ...grpc.CallOption) (*DiscoverA2AAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DiscoverA2AAgentResponse)
+	err := c.cc.Invoke(ctx, AgentService_DiscoverA2AAgent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -151,6 +166,10 @@ type AgentServiceServer interface {
 	ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error)
 	// 在指定团队下创建一个新的非主 Agent，并触发服务端加载。
 	CreateAgent(context.Context, *CreateAgentRequest) (*CreateAgentResponse, error)
+	// 探测一个 A2A（Agent2Agent）协议的外部 Agent：向 endpoint_url 发起 Agent Card
+	// 发现请求，返回对端名称/描述/技能/是否支持流式等信息，供前端在正式创建/保存前
+	// 预览与校验连通性，不产生任何持久化副作用。
+	DiscoverA2AAgent(context.Context, *DiscoverA2AAgentRequest) (*DiscoverA2AAgentResponse, error)
 	// 保存 Agent 配置并触发服务端重新加载该 Agent。
 	UpdateAgent(context.Context, *UpdateAgentRequest) (*UpdateAgentResponse, error)
 	// 删除一个非主 Agent；主 Agent（团队创建时自动生成）不可删除，
@@ -177,6 +196,9 @@ func (UnimplementedAgentServiceServer) ListAgents(context.Context, *ListAgentsRe
 }
 func (UnimplementedAgentServiceServer) CreateAgent(context.Context, *CreateAgentRequest) (*CreateAgentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateAgent not implemented")
+}
+func (UnimplementedAgentServiceServer) DiscoverA2AAgent(context.Context, *DiscoverA2AAgentRequest) (*DiscoverA2AAgentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DiscoverA2AAgent not implemented")
 }
 func (UnimplementedAgentServiceServer) UpdateAgent(context.Context, *UpdateAgentRequest) (*UpdateAgentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateAgent not implemented")
@@ -264,6 +286,24 @@ func _AgentService_CreateAgent_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServiceServer).CreateAgent(ctx, req.(*CreateAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_DiscoverA2AAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DiscoverA2AAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).DiscoverA2AAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_DiscoverA2AAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).DiscoverA2AAgent(ctx, req.(*DiscoverA2AAgentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -376,6 +416,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateAgent",
 			Handler:    _AgentService_CreateAgent_Handler,
+		},
+		{
+			MethodName: "DiscoverA2AAgent",
+			Handler:    _AgentService_DiscoverA2AAgent_Handler,
 		},
 		{
 			MethodName: "UpdateAgent",
