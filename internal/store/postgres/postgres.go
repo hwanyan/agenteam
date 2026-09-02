@@ -38,6 +38,7 @@ type a2aConfigDoc struct {
 	EndpointURL       string   `json:"endpoint_url"`
 	AuthScheme        string   `json:"auth_scheme"`
 	AuthToken         string   `json:"auth_token"`
+	TenantID          string   `json:"tenant_id"`
 	RemoteAgentName   string   `json:"remote_agent_name"`
 	RemoteDescription string   `json:"remote_description"`
 	RemoteSkills      []string `json:"remote_skills"`
@@ -52,6 +53,7 @@ func toA2ADoc(cfg *agenteamv1.A2AConfig) ([]byte, error) {
 		EndpointURL:       cfg.EndpointUrl,
 		AuthScheme:        cfg.AuthScheme,
 		AuthToken:         cfg.AuthToken,
+		TenantID:          cfg.TenantId,
 		RemoteAgentName:   cfg.RemoteAgentName,
 		RemoteDescription: cfg.RemoteDescription,
 		RemoteSkills:      cfg.RemoteSkills,
@@ -77,6 +79,7 @@ func fromA2ADoc(data []byte) (*agenteamv1.A2AConfig, error) {
 		AuthScheme:        doc.AuthScheme,
 		AuthToken:         doc.AuthToken,
 		AuthTokenSet:      doc.AuthToken != "",
+		TenantId:          doc.TenantID,
 		RemoteAgentName:   doc.RemoteAgentName,
 		RemoteDescription: doc.RemoteDescription,
 		RemoteSkills:      doc.RemoteSkills,

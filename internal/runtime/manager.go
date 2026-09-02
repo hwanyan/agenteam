@@ -72,6 +72,7 @@ func (m *Manager) discoverAndFillA2A(ctx context.Context, agent *agenteamv1.Agen
 		EndpointURL: cfg.EndpointUrl,
 		AuthScheme:  cfg.AuthScheme,
 		AuthToken:   cfg.AuthToken,
+		TenantID:    cfg.TenantId,
 	})
 	if err != nil {
 		return fmt.Errorf("连接 A2A Agent 失败: %w", err)
@@ -127,6 +128,7 @@ func toSnapshot(a *agenteamv1.Agent) *cache.AgentSnapshot {
 			EndpointURL:       a.A2AConfig.EndpointUrl,
 			AuthScheme:        a.A2AConfig.AuthScheme,
 			AuthToken:         a.A2AConfig.AuthToken,
+			TenantID:          a.A2AConfig.TenantId,
 			RemoteAgentName:   a.A2AConfig.RemoteAgentName,
 			RemoteDescription: a.A2AConfig.RemoteDescription,
 			RemoteSkills:      a.A2AConfig.RemoteSkills,
@@ -158,6 +160,7 @@ func fromSnapshot(s *cache.AgentSnapshot) *agenteamv1.Agent {
 			AuthScheme:        s.A2A.AuthScheme,
 			AuthToken:         s.A2A.AuthToken,
 			AuthTokenSet:      s.A2A.AuthToken != "",
+			TenantId:          s.A2A.TenantID,
 			RemoteAgentName:   s.A2A.RemoteAgentName,
 			RemoteDescription: s.A2A.RemoteDescription,
 			RemoteSkills:      s.A2A.RemoteSkills,

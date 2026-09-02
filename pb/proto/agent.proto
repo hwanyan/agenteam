@@ -111,6 +111,7 @@ message DiscoverA2AAgentRequest {
   string endpoint_url = 1;
   string auth_scheme = 2;
   string auth_token = 3;
+  string tenant_id = 4; // 对应 X-A2A-Tenant-Id 请求头，部分对端要求的"双因子鉴权"身份声明
 }
 
 message DiscoverA2AAgentResponse {

@@ -11,8 +11,9 @@
 //     以 SSE（Server-Sent Events）方式持续接收对端产生的增量文本，仅当对端
 //     Agent Card 声明 capabilities.streaming=true 时才应调用。
 //
-// 鉴权：目前只支持 "bearer"（HTTP Authorization: Bearer <token>）与无鉴权两种，
-// 对应 A2A 规范中 SecurityScheme 的一个子集，覆盖当前平台的实际接入场景。
+// 鉴权：支持 "bearer"（HTTP Authorization: Bearer <token>）与无鉴权两种标准 A2A
+// 鉴权方式；此外还支持部分对端采用的"TenantID + Token"双因子鉴权模型（额外要求
+// X-A2A-Tenant-Id 请求头，见 Config.TenantID），覆盖当前平台的实际接入场景。
 package a2a
 
 import (
@@ -31,6 +32,10 @@ import (
 
 // agentCardPath 是 A2A 规范约定的 Agent Card 发现路径。
 const agentCardPath = "/.well-known/agent-card.json"
+
+// tenantHeader 是"TenantID + Token"双因子鉴权模型中，调用方声明自身身份所使用的
+// 请求头名，需与 Authorization: Bearer <token> 配合使用（约定见 Config.TenantID）。
+const tenantHeader = "X-A2A-Tenant-Id"
 
 // requestTimeout 是对外部 A2A Agent 发起非流式 HTTP 请求的超时时间。
 const requestTimeout = 30 * time.Second
@@ -60,6 +65,10 @@ type Config struct {
 	EndpointURL string // 外部 Agent 的服务地址（不含 /.well-known/... 后缀）
 	AuthScheme  string // 目前支持 "" / "bearer"
 	AuthToken   string
+	// TenantID 对应部分对端要求的 X-A2A-Tenant-Id 请求头（"TenantID + Token"双因子
+	// 鉴权模型，如本项目姊妹项目 agently 的 A2A 服务端实现）：与 AuthToken 搭配使用，
+	// 二者缺一不可。留空则不发送该头，兼容标准 A2A 单因子/无鉴权场景。
+	TenantID string
 }
 
 // Client 是 A2A 协议客户端，负责 Agent Card 发现与消息发送（非流式/流式）。
@@ -513,6 +522,9 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- StreamChunk) error 
 }
 
 func applyAuth(req *http.Request, cfg Config) {
+	if tid := strings.TrimSpace(cfg.TenantID); tid != "" {
+		req.Header.Set(tenantHeader, tid)
+	}
 	if cfg.AuthToken == "" {
 		return
 	}

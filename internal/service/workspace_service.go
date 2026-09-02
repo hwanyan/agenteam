@@ -103,6 +103,7 @@ func (s *WorkspaceServer) replyFor(ctx context.Context, agent *agenteamv1.Agent,
 			EndpointURL: agent.A2AConfig.EndpointUrl,
 			AuthScheme:  agent.A2AConfig.AuthScheme,
 			AuthToken:   agent.A2AConfig.AuthToken,
+			TenantID:    agent.A2AConfig.TenantId,
 		}, content)
 		if err != nil {
 			return "", status.Errorf(codes.Unavailable, "调用 A2A Agent 失败: %v", err)
@@ -249,6 +250,7 @@ func (s *WorkspaceServer) streamA2AReply(ctx context.Context, stream agenteamv1.
 		EndpointURL: agent.A2AConfig.EndpointUrl,
 		AuthScheme:  agent.A2AConfig.AuthScheme,
 		AuthToken:   agent.A2AConfig.AuthToken,
+		TenantID:    agent.A2AConfig.TenantId,
 	}
 
 	if !agent.A2AConfig.Streaming {

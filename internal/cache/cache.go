@@ -32,9 +32,12 @@ type AgentSnapshot struct {
 
 // A2ASnapshot 是 A2AConfig 在运行态缓存中的快照形式。
 type A2ASnapshot struct {
-	EndpointURL       string
-	AuthScheme        string
-	AuthToken         string
+	EndpointURL string
+	AuthScheme  string
+	AuthToken   string
+	// TenantID 对应部分对端要求的 X-A2A-Tenant-Id 请求头（"TenantID + Token"
+	// 双因子鉴权模型），与 AuthToken 搭配使用。
+	TenantID          string
 	RemoteAgentName   string
 	RemoteDescription string
 	RemoteSkills      []string

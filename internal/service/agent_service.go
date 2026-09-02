@@ -88,6 +88,7 @@ func (s *AgentServer) CreateAgent(ctx context.Context, req *agenteamv1.CreateAge
 			EndpointUrl: req.A2AConfig.EndpointUrl,
 			AuthScheme:  req.A2AConfig.AuthScheme,
 			AuthToken:   req.A2AConfig.AuthToken,
+			TenantId:    req.A2AConfig.TenantId,
 		}
 	default:
 		if req.Prompt == "" {
@@ -124,6 +125,7 @@ func (s *AgentServer) DiscoverA2AAgent(ctx context.Context, req *agenteamv1.Disc
 		EndpointURL: req.EndpointUrl,
 		AuthScheme:  req.AuthScheme,
 		AuthToken:   req.AuthToken,
+		TenantID:    req.TenantId,
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "连接 A2A Agent 失败: %v", err)
@@ -183,6 +185,7 @@ func (s *AgentServer) UpdateAgent(ctx context.Context, req *agenteamv1.UpdateAge
 			EndpointUrl: req.A2AConfig.EndpointUrl,
 			AuthScheme:  req.A2AConfig.AuthScheme,
 			AuthToken:   authToken,
+			TenantId:    req.A2AConfig.TenantId,
 		}
 	default:
 		if req.Prompt == "" {

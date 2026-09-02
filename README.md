@@ -43,7 +43,12 @@ Store 按数据形态拆分到不同数据库，而非塞进同一种数据库�
 - **Agent**：`kind` 字段区分两种创建/接入方式（创建后不可变更）：
   - `AGENT_KIND_PROMPT`（默认）：本地 Prompt + LLM 驱动，包含 name / prompt / model / mcp_tools / skills 等配置。
   - `AGENT_KIND_A2A`：通过 [A2A（Agent2Agent）协议](https://a2a-protocol.org/) 链接一个外部 Agent 提供方，
-    只需 name + `a2a_config.endpoint_url`（可选 `auth_scheme`/`auth_token`），prompt/model/mcp_tools/skills 对该方式无效。
+    只需 name + `a2a_config.endpoint_url`（可选 `auth_scheme`/`auth_token`/`tenant_id`），
+    prompt/model/mcp_tools/skills 对该方式无效。部分第三方 A2A Agent（如姊妹项目 `agently`）
+    采用“TenantID + Token”双因子鉴权模型：除 `Authorization: Bearer <token>` 外，还要求通过
+    `X-A2A-Tenant-Id: <tenant_id>` 请求头显式声明调用方身份，二者缺一不可；`tenant_id`
+    由对端预先分配、属非机密的身份标识（类似 AccessKeyId），与 `auth_token` 不同，
+    响应中会如实回显，不需要脱敏（不经过 `redactAgent`）。
   两种方式均在保存（`CreateAgent`/`UpdateAgent`）时触发 `internal/runtime.Manager.Load`：
   校验配置合法性（A2A 方式还会实际向 `endpoint_url` 发起一次 Agent Card 发现请求校验连通性，
   并回填对端名称/描述/技能/是否支持流式到 `a2a_config` 的只读字段）→ 版本号自增 →

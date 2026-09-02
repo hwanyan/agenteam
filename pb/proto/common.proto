@@ -41,6 +41,13 @@ message A2AConfig {
   string remote_description = 6;   // 只读：从对端 Agent Card 中获取到的描述
   repeated string remote_skills = 7; // 只读：对端 Agent Card 声明的技能名称列表
   bool streaming = 8;               // 只读：对端 Agent Card 中 capabilities.streaming 声明
+  // 部分第三方 A2A Agent 采用"TenantID + Token"双因子鉴权模型（如本项目的姊妹项目
+  // agently）：除 Authorization: Bearer <token> 外，还要求调用方通过
+  // X-A2A-Tenant-Id 请求头显式声明自己的租户身份，服务端据此做身份查找、再与
+  // token 比对，二者缺一不可。tenant_id 由对端预先分配给调用方，属非机密的身份
+  // 标识（类似 AccessKeyId），因此与 auth_token 不同，可以在响应中如实回显，
+  // 不需要脱敏。留空表示对端不需要该头（标准 A2A 单因子/无鉴权场景）。
+  string tenant_id = 9;
 }
 
 // Agent 是团队中的最小执行单元，目前每个团队自动拥有一个主 Agent。

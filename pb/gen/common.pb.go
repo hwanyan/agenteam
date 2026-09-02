@@ -192,8 +192,15 @@ type A2AConfig struct {
 	RemoteDescription string   `protobuf:"bytes,6,opt,name=remote_description,json=remoteDescription,proto3" json:"remote_description,omitempty"` // 只读：从对端 Agent Card 中获取到的描述
 	RemoteSkills      []string `protobuf:"bytes,7,rep,name=remote_skills,json=remoteSkills,proto3" json:"remote_skills,omitempty"`                // 只读：对端 Agent Card 声明的技能名称列表
 	Streaming         bool     `protobuf:"varint,8,opt,name=streaming,proto3" json:"streaming,omitempty"`                                         // 只读：对端 Agent Card 中 capabilities.streaming 声明
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// 部分第三方 A2A Agent 采用"TenantID + Token"双因子鉴权模型（如本项目的姊妹项目
+	// agently）：除 Authorization: Bearer <token> 外，还要求调用方通过
+	// X-A2A-Tenant-Id 请求头显式声明自己的租户身份，服务端据此做身份查找、再与
+	// token 比对，二者缺一不可。tenant_id 由对端预先分配给调用方，属非机密的身份
+	// 标识（类似 AccessKeyId），因此与 auth_token 不同，可以在响应中如实回显，
+	// 不需要脱敏。留空表示对端不需要该头（标准 A2A 单因子/无鉴权场景）。
+	TenantId      string `protobuf:"bytes,9,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *A2AConfig) Reset() {
@@ -280,6 +287,13 @@ func (x *A2AConfig) GetStreaming() bool {
 		return x.Streaming
 	}
 	return false
+}
+
+func (x *A2AConfig) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
 }
 
 // Agent 是团队中的最小执行单元，目前每个团队自动拥有一个主 Agent。
@@ -727,7 +741,7 @@ var File_common_proto protoreflect.FileDescriptor
 
 const file_common_proto_rawDesc = "" +
 	"\n" +
-	"\fcommon.proto\x12\vagenteam.v1\"\xb2\x02\n" +
+	"\fcommon.proto\x12\vagenteam.v1\"\xcf\x02\n" +
 	"\tA2AConfig\x12!\n" +
 	"\fendpoint_url\x18\x01 \x01(\tR\vendpointUrl\x12\x1f\n" +
 	"\vauth_scheme\x18\x02 \x01(\tR\n" +
@@ -738,7 +752,8 @@ const file_common_proto_rawDesc = "" +
 	"\x11remote_agent_name\x18\x05 \x01(\tR\x0fremoteAgentName\x12-\n" +
 	"\x12remote_description\x18\x06 \x01(\tR\x11remoteDescription\x12#\n" +
 	"\rremote_skills\x18\a \x03(\tR\fremoteSkills\x12\x1c\n" +
-	"\tstreaming\x18\b \x01(\bR\tstreaming\"\xad\x03\n" +
+	"\tstreaming\x18\b \x01(\bR\tstreaming\x12\x1b\n" +
+	"\ttenant_id\x18\t \x01(\tR\btenantId\"\xad\x03\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x12\n" +

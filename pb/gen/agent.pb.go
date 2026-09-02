@@ -347,6 +347,7 @@ type DiscoverA2AAgentRequest struct {
 	EndpointUrl   string                 `protobuf:"bytes,1,opt,name=endpoint_url,json=endpointUrl,proto3" json:"endpoint_url,omitempty"`
 	AuthScheme    string                 `protobuf:"bytes,2,opt,name=auth_scheme,json=authScheme,proto3" json:"auth_scheme,omitempty"`
 	AuthToken     string                 `protobuf:"bytes,3,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	TenantId      string                 `protobuf:"bytes,4,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"` // 对应 X-A2A-Tenant-Id 请求头，部分对端要求的"双因子鉴权"身份声明
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -398,6 +399,13 @@ func (x *DiscoverA2AAgentRequest) GetAuthScheme() string {
 func (x *DiscoverA2AAgentRequest) GetAuthToken() string {
 	if x != nil {
 		return x.AuthToken
+	}
+	return ""
+}
+
+func (x *DiscoverA2AAgentRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
 	}
 	return ""
 }
@@ -950,13 +958,14 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"a2a_config\x18\b \x01(\v2\x16.agenteam.v1.A2AConfigR\ta2aConfig\"?\n" +
 	"\x13CreateAgentResponse\x12(\n" +
-	"\x05agent\x18\x01 \x01(\v2\x12.agenteam.v1.AgentR\x05agent\"|\n" +
+	"\x05agent\x18\x01 \x01(\v2\x12.agenteam.v1.AgentR\x05agent\"\x99\x01\n" +
 	"\x17DiscoverA2AAgentRequest\x12!\n" +
 	"\fendpoint_url\x18\x01 \x01(\tR\vendpointUrl\x12\x1f\n" +
 	"\vauth_scheme\x18\x02 \x01(\tR\n" +
 	"authScheme\x12\x1d\n" +
 	"\n" +
-	"auth_token\x18\x03 \x01(\tR\tauthToken\"\xb8\x01\n" +
+	"auth_token\x18\x03 \x01(\tR\tauthToken\x12\x1b\n" +
+	"\ttenant_id\x18\x04 \x01(\tR\btenantId\"\xb8\x01\n" +
 	"\x18DiscoverA2AAgentResponse\x12*\n" +
 	"\x11remote_agent_name\x18\x01 \x01(\tR\x0fremoteAgentName\x12-\n" +
 	"\x12remote_description\x18\x02 \x01(\tR\x11remoteDescription\x12#\n" +
