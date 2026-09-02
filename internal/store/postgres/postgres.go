@@ -187,6 +187,7 @@ func (s *Store) SaveAgent(ctx context.Context, agent *agenteamv1.Agent) error {
 	if err != nil {
 		return err
 	}
+	mcpTools, skills := nonNilStrings(agent.McpTools), nonNilStrings(agent.Skills)
 	_, err = s.pool.Exec(ctx, `
 		INSERT INTO agents (id, team_id, name, prompt, model, mcp_tools, skills, is_main, version, status, created_at, updated_at, kind, a2a_config)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -203,13 +204,28 @@ func (s *Store) SaveAgent(ctx context.Context, agent *agenteamv1.Agent) error {
 			a2a_config = EXCLUDED.a2a_config
 	`,
 		agent.Id, agent.TeamId, agent.Name, agent.Prompt, agent.Model,
-		agent.McpTools, agent.Skills, agent.IsMain, agent.Version, agent.Status.String(),
+		mcpTools, skills, agent.IsMain, agent.Version, agent.Status.String(),
 		agent.CreatedAt, agent.UpdatedAt, agentKindDBValue(agent.Kind), a2aDoc,
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: upsert agent: %w", err)
 	}
 	return nil
+}
+
+// nonNilStrings 把 nil slice 归一化为非 nil 的空 slice。
+//
+// agents.mcp_tools / agents.skills 两列声明为 TEXT[] NOT NULL DEFAULT '{}'，但
+// DEFAULT 只在 INSERT 未显式提供该列值时才生效；本文件的 INSERT 语句始终显式
+// 传参，一旦上层（如 AGENT_KIND_A2A 的 Agent，其 McpTools/Skills 对该方式无意义、
+// 未被赋值）传入零值 nil slice，pgx 驱动会将其编码为 SQL NULL 而非空数组，
+// 从而违反 NOT NULL 约束（SQLSTATE 23502）。这里在写库前统一兜底转换，
+// 避免依赖上层每个 Kind 分支都记得显式初始化。
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // GetAgent 按 id 查询 Agent。
@@ -315,7 +331,7 @@ func insertAgent(ctx context.Context, q execer, agent *agenteamv1.Agent) error {
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 	`,
 		agent.Id, agent.TeamId, agent.Name, agent.Prompt, agent.Model,
-		agent.McpTools, agent.Skills, agent.IsMain, agent.Version, agent.Status.String(),
+		nonNilStrings(agent.McpTools), nonNilStrings(agent.Skills), agent.IsMain, agent.Version, agent.Status.String(),
 		agent.CreatedAt, agent.UpdatedAt, agentKindDBValue(agent.Kind), a2aDoc,
 	)
 	if err != nil {

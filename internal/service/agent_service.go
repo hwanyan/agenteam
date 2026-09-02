@@ -75,6 +75,8 @@ func (s *AgentServer) CreateAgent(ctx context.Context, req *agenteamv1.CreateAge
 		Name:      req.Name,
 		IsMain:    false,
 		Kind:      kind,
+		McpTools:  []string{}, // AGENT_KIND_A2A 对该字段无意义，保持非 nil 空切片而非 nil
+		Skills:    []string{}, // 同上，避免 pgx 把 nil slice 编码为 SQL NULL 违反 NOT NULL 约束
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -168,6 +170,8 @@ func (s *AgentServer) UpdateAgent(ctx context.Context, req *agenteamv1.UpdateAge
 		Name:      req.Name,
 		IsMain:    agent.IsMain,
 		Kind:      agent.Kind,
+		McpTools:  []string{}, // AGENT_KIND_A2A 对该字段无意义，保持非 nil 空切片而非 nil
+		Skills:    []string{}, // 同上，避免 pgx 把 nil slice 编码为 SQL NULL 违反 NOT NULL 约束
 		Version:   agent.Version,
 		CreatedAt: agent.CreatedAt,
 	}
