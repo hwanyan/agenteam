@@ -52,18 +52,64 @@ func newDeepSeekClient(apiKey, baseURL string) *DeepSeekClient {
 	return &DeepSeekClient{cli: cli}
 }
 
-func (c *DeepSeekClient) Chat(ctx context.Context, req ChatRequest) (string, error) {
+func (c *DeepSeekClient) Chat(ctx context.Context, req ChatRequest) (ChatResult, error) {
 	resp, err := c.cli.CreateChatCompletion(ctx, &deepseek.ChatCompletionRequest{
 		Model:    resolveModel(req.Model),
 		Messages: buildMessages(req),
+		Tools:    buildTools(req.Tools),
 	})
 	if err != nil {
-		return "", fmt.Errorf("llm: deepseek chat completion: %w", err)
+		return ChatResult{}, fmt.Errorf("llm: deepseek chat completion: %w", err)
 	}
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("llm: empty choices in response")
+		return ChatResult{}, fmt.Errorf("llm: empty choices in response")
 	}
-	return resp.Choices[0].Message.Content, nil
+	msg := resp.Choices[0].Message
+	return ChatResult{Content: msg.Content, ToolCalls: mapToolCalls(msg.ToolCalls)}, nil
+}
+
+// buildTools 将平台内 provider 无关的 Tool 定义转换为 DeepSeek SDK 所需的
+// function calling 请求结构（JSON Schema 的 object 参数）。
+func buildTools(tools []Tool) []deepseek.Tool {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]deepseek.Tool, 0, len(tools))
+	for _, t := range tools {
+		props := make(map[string]any, len(t.Properties))
+		for name, p := range t.Properties {
+			prop := map[string]any{"type": p.Type, "description": p.Description}
+			if len(p.Enum) > 0 {
+				prop["enum"] = p.Enum
+			}
+			props[name] = prop
+		}
+		out = append(out, deepseek.Tool{
+			Type: "function",
+			Function: deepseek.Function{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters: &deepseek.FunctionParameters{
+					Type:       "object",
+					Properties: props,
+					Required:   t.Required,
+				},
+			},
+		})
+	}
+	return out
+}
+
+// mapToolCalls 将 DeepSeek SDK 返回的 ToolCall 转换为平台内 provider 无关的结构。
+func mapToolCalls(calls []deepseek.ToolCall) []ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]ToolCall, 0, len(calls))
+	for _, c := range calls {
+		out = append(out, ToolCall{ID: c.ID, Name: c.Function.Name, Arguments: c.Function.Arguments})
+	}
+	return out
 }
 
 // ChatStream 对接 DeepSeek 官方 SDK 的流式 Chat Completions 接口
@@ -142,8 +188,11 @@ func resolveModel(model string) string {
 // 而不依赖任何真实的外部大模型服务。
 type EchoClient struct{}
 
-func (c *EchoClient) Chat(_ context.Context, req ChatRequest) (string, error) {
-	return echoReply(req), nil
+// Echo 模式不接入真实模型，自然也无法真正执行 function calling / 委派决策，
+// 因此始终返回纯文本回复（不产生 ToolCalls）——这也意味着"团队内多 Agent 委派"
+// 这一能力在未配置 DEEPSEEK_API_KEY 的本地演示模式下不会生效，只能用真实模型验证。
+func (c *EchoClient) Chat(_ context.Context, req ChatRequest) (ChatResult, error) {
+	return ChatResult{Content: echoReply(req)}, nil
 }
 
 // echoStreamChunkSize 是 Echo 客户端模拟流式输出时，每个 chunk 携带的字符数。

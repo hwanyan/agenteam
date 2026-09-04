@@ -70,6 +70,17 @@ Store 按数据形态拆分到不同数据库，而非塞进同一种数据库�
     - 否则（或非流式接口 `SendMessage`）退化/统一调用非流式的 `message/send`，
       一次性获取完整回复后（流式场景下）作为单个 delta 推送。
   两种方式下，用户消息与最终完整回复都会持久化到 MongoDB，历史记录格式保持一致。
+  - **团队内多 Agent 委派（delegation）**：仅当发起对话的 Agent 是团队**主 Agent**、走本地
+    Prompt 方式、且团队内还存在其他 Agent 时才会启用（`internal/service.resolveDelegationTools`）：
+    会把团队内其他 Agent 的 `名称 + 能力摘要`（Prompt 方式取 Prompt 摘要；A2A 方式取
+    `a2a_config.remote_description`）追加进主 Agent 的 system prompt，并下发一个
+    `delegate_to_agent(agent_id, message)` function-calling 工具（DeepSeek 官方 SDK
+    的 Tools/ToolCalls 能力）。主 Agent 判断本次请求更适合某个子 Agent 处理时会调用该工具，
+    服务端据此把请求真正转发给对应子 Agent（Prompt 方式走 `ChatStream` 实时流式转发；
+    A2A 方式复用既有的 `streamA2AReply`），并在回复前加上「由子 Agent「xxx」处理：」提示，
+    committing 到同一条团队对话历史中。只做一层委派（子 Agent 不会再继续委派），避免委派链路
+    / 死循环；未配置 `DEEPSEEK_API_KEY`（走本地 `EchoClient`）时不支持该能力，因为
+    Echo 客户端不会产生真实的 ToolCalls。
   - **HTTP 网关注册方式说明**：`main.go` 中 Team/Agent 服务通过 grpc-gateway 的 in-process
     直调（`RegisterXxxHandlerServer`）挂载，无需拨号；但 Workspace 服务因含 server-streaming
     RPC，in-process 直调模式对流式转发返回 `Unimplemented`（grpc-gateway 已知限制），因此改为

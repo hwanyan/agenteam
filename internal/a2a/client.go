@@ -200,10 +200,12 @@ func (c *Client) SendMessage(ctx context.Context, cfg Config, content string) (s
 		return "", fmt.Errorf("a2a: 序列化 message/send 请求失败: %w", err)
 	}
 
+	// 把上一步 json.Marshal 出的 JSON 负载，包装成标准 *http.Request
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base, bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("a2a: 构造 message/send 请求失败: %w", err)
 	}
+	// 给 req 设请求头
 	req.Header.Set("Content-Type", "application/json")
 	applyAuth(req, cfg)
 
