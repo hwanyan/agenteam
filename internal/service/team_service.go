@@ -29,9 +29,20 @@ func NewTeamServer(deps *Deps) *TeamServer {
 }
 
 // CreateTeam 创建团队，并自动创建、加载该团队的主 Agent。
+//
+// 主 Agent 的创建方式由 req.Kind 决定（未指定时按 AGENT_KIND_PROMPT 处理，兼容旧客户端
+// 只传 name 的用法）：
+//   - AGENT_KIND_PROMPT（默认）：本地 Prompt + LLM 驱动，prompt/model 留空时使用平台默认值。
+//   - AGENT_KIND_A2A：主 Agent 直接链接一个外部 A2A Agent 提供方，与 AgentServer.CreateAgent
+//     对 A2A 方式的校验逻辑保持一致（至少需要 a2a_config.endpoint_url）。
 func (s *TeamServer) CreateTeam(ctx context.Context, req *agenteamv1.CreateTeamRequest) (*agenteamv1.CreateTeamResponse, error) {
 	if req.Name == "" {
 		return nil, status.Error(codes.InvalidArgument, "团队名称不能为空")
+	}
+
+	kind := req.Kind
+	if kind == agenteamv1.AgentKind_AGENT_KIND_UNSPECIFIED {
+		kind = agenteamv1.AgentKind_AGENT_KIND_PROMPT
 	}
 
 	now := time.Now().Unix()
@@ -42,20 +53,43 @@ func (s *TeamServer) CreateTeam(ctx context.Context, req *agenteamv1.CreateTeamR
 		Id:        agentID,
 		TeamId:    teamID,
 		Name:      "主 Agent",
-		Prompt:    defaultMainAgentPrompt,
-		Model:     options.DefaultModel,
-		McpTools:  []string{},
-		Skills:    []string{},
 		IsMain:    true,
-		Kind:      agenteamv1.AgentKind_AGENT_KIND_PROMPT,
+		Kind:      kind,
+		McpTools:  []string{}, // AGENT_KIND_A2A 对该字段无意义，保持非 nil 空切片而非 nil
+		Skills:    []string{}, // 同上，避免 pgx 把 nil slice 编码为 SQL NULL 违反 NOT NULL 约束
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+
+	switch kind {
+	case agenteamv1.AgentKind_AGENT_KIND_A2A:
+		if req.A2AConfig == nil || req.A2AConfig.EndpointUrl == "" {
+			return nil, status.Error(codes.InvalidArgument, "A2A 接入地址（endpoint_url）不能为空")
+		}
+		agent.A2AConfig = &agenteamv1.A2AConfig{
+			EndpointUrl: req.A2AConfig.EndpointUrl,
+			AuthScheme:  req.A2AConfig.AuthScheme,
+			AuthToken:   req.A2AConfig.AuthToken,
+			TenantId:    req.A2AConfig.TenantId,
+		}
+	default:
+		prompt := req.Prompt
+		if prompt == "" {
+			prompt = defaultMainAgentPrompt
+		}
+		model := req.Model
+		if model == "" {
+			model = options.DefaultModel
+		}
+		agent.Prompt = prompt
+		agent.Model = model
+		agent.McpTools = append([]string{}, req.McpTools...)
+		agent.Skills = append([]string{}, req.Skills...)
+	}
+
 	agent, err := s.Runtime.Load(ctx, agent)
 	if err != nil {
-		// 主 Agent 的默认配置来自平台内置默认值，理论上不应校验失败；
-		// 一旦出现说明是平台代码缺陷，返回 Internal 更贴切。
-		return nil, status.Errorf(codes.Internal, "初始化主 Agent 失败: %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "初始化主 Agent 失败: %v", err)
 	}
 
 	team := &agenteamv1.Team{

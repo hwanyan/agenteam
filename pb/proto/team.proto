@@ -36,8 +36,20 @@ service TeamService {
   }
 }
 
+// 创建团队时会一并创建其主 Agent，因此本请求同时携带主 Agent 的创建参数
+// （字段含义与 CreateAgentRequest 中对应字段一致）：
+//   - kind 未指定（AGENT_KIND_UNSPECIFIED）时按 AGENT_KIND_PROMPT 处理，兼容旧客户端
+//     （只传 name 也能创建成功，prompt/model 留空时使用平台默认值）；
+//   - kind=AGENT_KIND_A2A 时，主 Agent 直接链接一个外部 A2A Agent 提供方，
+//     prompt/model/mcp_tools/skills 对该方式无效，a2a_config.endpoint_url 必填。
 message CreateTeamRequest {
   string name = 1;
+  string prompt = 2;             // kind=AGENT_KIND_PROMPT 时可选，留空使用平台默认主 Agent Prompt
+  string model = 3;              // kind=AGENT_KIND_PROMPT 时可选，留空使用平台默认模型
+  repeated string mcp_tools = 4;
+  repeated string skills = 5;
+  AgentKind kind = 6;             // 主 Agent 的创建方式，默认 AGENT_KIND_PROMPT
+  A2AConfig a2a_config = 7;       // kind=AGENT_KIND_A2A 时必填（至少填 endpoint_url）
 }
 
 message CreateTeamResponse {

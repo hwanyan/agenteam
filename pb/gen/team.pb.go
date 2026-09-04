@@ -22,9 +22,21 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// 创建团队时会一并创建其主 Agent，因此本请求同时携带主 Agent 的创建参数
+// （字段含义与 CreateAgentRequest 中对应字段一致）：
+//   - kind 未指定（AGENT_KIND_UNSPECIFIED）时按 AGENT_KIND_PROMPT 处理，兼容旧客户端
+//     （只传 name 也能创建成功，prompt/model 留空时使用平台默认值）；
+//   - kind=AGENT_KIND_A2A 时，主 Agent 直接链接一个外部 A2A Agent 提供方，
+//     prompt/model/mcp_tools/skills 对该方式无效，a2a_config.endpoint_url 必填。
 type CreateTeamRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Prompt        string                 `protobuf:"bytes,2,opt,name=prompt,proto3" json:"prompt,omitempty"` // kind=AGENT_KIND_PROMPT 时可选，留空使用平台默认主 Agent Prompt
+	Model         string                 `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`   // kind=AGENT_KIND_PROMPT 时可选，留空使用平台默认模型
+	McpTools      []string               `protobuf:"bytes,4,rep,name=mcp_tools,json=mcpTools,proto3" json:"mcp_tools,omitempty"`
+	Skills        []string               `protobuf:"bytes,5,rep,name=skills,proto3" json:"skills,omitempty"`
+	Kind          AgentKind              `protobuf:"varint,6,opt,name=kind,proto3,enum=agenteam.v1.AgentKind" json:"kind,omitempty"` // 主 Agent 的创建方式，默认 AGENT_KIND_PROMPT
+	A2AConfig     *A2AConfig             `protobuf:"bytes,7,opt,name=a2a_config,json=a2aConfig,proto3" json:"a2a_config,omitempty"`  // kind=AGENT_KIND_A2A 时必填（至少填 endpoint_url）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -64,6 +76,48 @@ func (x *CreateTeamRequest) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *CreateTeamRequest) GetPrompt() string {
+	if x != nil {
+		return x.Prompt
+	}
+	return ""
+}
+
+func (x *CreateTeamRequest) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *CreateTeamRequest) GetMcpTools() []string {
+	if x != nil {
+		return x.McpTools
+	}
+	return nil
+}
+
+func (x *CreateTeamRequest) GetSkills() []string {
+	if x != nil {
+		return x.Skills
+	}
+	return nil
+}
+
+func (x *CreateTeamRequest) GetKind() AgentKind {
+	if x != nil {
+		return x.Kind
+	}
+	return AgentKind_AGENT_KIND_UNSPECIFIED
+}
+
+func (x *CreateTeamRequest) GetA2AConfig() *A2AConfig {
+	if x != nil {
+		return x.A2AConfig
+	}
+	return nil
 }
 
 type CreateTeamResponse struct {
@@ -371,9 +425,16 @@ var File_team_proto protoreflect.FileDescriptor
 const file_team_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"team.proto\x12\vagenteam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\fcommon.proto\"'\n" +
+	"team.proto\x12\vagenteam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\fcommon.proto\"\xed\x01\n" +
 	"\x11CreateTeamRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"n\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06prompt\x18\x02 \x01(\tR\x06prompt\x12\x14\n" +
+	"\x05model\x18\x03 \x01(\tR\x05model\x12\x1b\n" +
+	"\tmcp_tools\x18\x04 \x03(\tR\bmcpTools\x12\x16\n" +
+	"\x06skills\x18\x05 \x03(\tR\x06skills\x12*\n" +
+	"\x04kind\x18\x06 \x01(\x0e2\x16.agenteam.v1.AgentKindR\x04kind\x125\n" +
+	"\n" +
+	"a2a_config\x18\a \x01(\v2\x16.agenteam.v1.A2AConfigR\ta2aConfig\"n\n" +
 	"\x12CreateTeamResponse\x12%\n" +
 	"\x04team\x18\x01 \x01(\v2\x11.agenteam.v1.TeamR\x04team\x121\n" +
 	"\n" +
@@ -418,27 +479,31 @@ var file_team_proto_goTypes = []any{
 	(*GetTeamResponse)(nil),    // 5: agenteam.v1.GetTeamResponse
 	(*DeleteTeamRequest)(nil),  // 6: agenteam.v1.DeleteTeamRequest
 	(*DeleteTeamResponse)(nil), // 7: agenteam.v1.DeleteTeamResponse
-	(*Team)(nil),               // 8: agenteam.v1.Team
-	(*Agent)(nil),              // 9: agenteam.v1.Agent
+	(AgentKind)(0),             // 8: agenteam.v1.AgentKind
+	(*A2AConfig)(nil),          // 9: agenteam.v1.A2AConfig
+	(*Team)(nil),               // 10: agenteam.v1.Team
+	(*Agent)(nil),              // 11: agenteam.v1.Agent
 }
 var file_team_proto_depIdxs = []int32{
-	8, // 0: agenteam.v1.CreateTeamResponse.team:type_name -> agenteam.v1.Team
-	9, // 1: agenteam.v1.CreateTeamResponse.main_agent:type_name -> agenteam.v1.Agent
-	8, // 2: agenteam.v1.ListTeamsResponse.teams:type_name -> agenteam.v1.Team
-	8, // 3: agenteam.v1.GetTeamResponse.team:type_name -> agenteam.v1.Team
-	0, // 4: agenteam.v1.TeamService.CreateTeam:input_type -> agenteam.v1.CreateTeamRequest
-	2, // 5: agenteam.v1.TeamService.ListTeams:input_type -> agenteam.v1.ListTeamsRequest
-	4, // 6: agenteam.v1.TeamService.GetTeam:input_type -> agenteam.v1.GetTeamRequest
-	6, // 7: agenteam.v1.TeamService.DeleteTeam:input_type -> agenteam.v1.DeleteTeamRequest
-	1, // 8: agenteam.v1.TeamService.CreateTeam:output_type -> agenteam.v1.CreateTeamResponse
-	3, // 9: agenteam.v1.TeamService.ListTeams:output_type -> agenteam.v1.ListTeamsResponse
-	5, // 10: agenteam.v1.TeamService.GetTeam:output_type -> agenteam.v1.GetTeamResponse
-	7, // 11: agenteam.v1.TeamService.DeleteTeam:output_type -> agenteam.v1.DeleteTeamResponse
-	8, // [8:12] is the sub-list for method output_type
-	4, // [4:8] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	8,  // 0: agenteam.v1.CreateTeamRequest.kind:type_name -> agenteam.v1.AgentKind
+	9,  // 1: agenteam.v1.CreateTeamRequest.a2a_config:type_name -> agenteam.v1.A2AConfig
+	10, // 2: agenteam.v1.CreateTeamResponse.team:type_name -> agenteam.v1.Team
+	11, // 3: agenteam.v1.CreateTeamResponse.main_agent:type_name -> agenteam.v1.Agent
+	10, // 4: agenteam.v1.ListTeamsResponse.teams:type_name -> agenteam.v1.Team
+	10, // 5: agenteam.v1.GetTeamResponse.team:type_name -> agenteam.v1.Team
+	0,  // 6: agenteam.v1.TeamService.CreateTeam:input_type -> agenteam.v1.CreateTeamRequest
+	2,  // 7: agenteam.v1.TeamService.ListTeams:input_type -> agenteam.v1.ListTeamsRequest
+	4,  // 8: agenteam.v1.TeamService.GetTeam:input_type -> agenteam.v1.GetTeamRequest
+	6,  // 9: agenteam.v1.TeamService.DeleteTeam:input_type -> agenteam.v1.DeleteTeamRequest
+	1,  // 10: agenteam.v1.TeamService.CreateTeam:output_type -> agenteam.v1.CreateTeamResponse
+	3,  // 11: agenteam.v1.TeamService.ListTeams:output_type -> agenteam.v1.ListTeamsResponse
+	5,  // 12: agenteam.v1.TeamService.GetTeam:output_type -> agenteam.v1.GetTeamResponse
+	7,  // 13: agenteam.v1.TeamService.DeleteTeam:output_type -> agenteam.v1.DeleteTeamResponse
+	10, // [10:14] is the sub-list for method output_type
+	6,  // [6:10] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_team_proto_init() }

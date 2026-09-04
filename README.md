@@ -39,7 +39,16 @@ Store 按数据形态拆分到不同数据库，而非塞进同一种数据库�
 
 ## 核心概念
 
-- **Team（团队）**：创建时自动生成一个 `is_main=true` 的主 Agent（固定为 Prompt 方式）。
+- **Team（团队）**：创建时自动生成一个 `is_main=true` 的主 Agent，创建方式与普通 Agent 一致，
+  由 `CreateTeamRequest.kind` 决定（未指定时默认 `AGENT_KIND_PROMPT`，`prompt`/`model` 留空则
+  使用平台默认值，兼容旧客户端仅传 `name` 的用法）：主 Agent 既可以是本地 Prompt 驱动，也可以
+  直接 `kind=AGENT_KIND_A2A` 链接一个外部 A2A Agent 提供方作为主 Agent（校验逻辑与
+  `AgentService.CreateAgent` 对 A2A 方式的处理一致）。前端「新增团队」表单已提供与「新增 Agent」
+  弹窗一致的创建方式切换 UI。
+  注意：若主 Agent 走 A2A 方式，`internal/service.resolveDelegationTools` 会直接短路——委派机制
+  依赖向主 Agent 下发本地 function calling 工具，无法对不受控的外部 A2A Agent 生效，因此
+  A2A 主 Agent 的团队即便还有其他 Agent，也不具备"团队内多 Agent 委派"能力，只能作为单一
+  Agent 使用（这也是本项目当前的已知边界，而非缺陷）。
 - **Agent**：`kind` 字段区分两种创建/接入方式（创建后不可变更）：
   - `AGENT_KIND_PROMPT`（默认）：本地 Prompt + LLM 驱动，包含 name / prompt / model / mcp_tools / skills 等配置。
   - `AGENT_KIND_A2A`：通过 [A2A（Agent2Agent）协议](https://a2a-protocol.org/) 链接一个外部 Agent 提供方，

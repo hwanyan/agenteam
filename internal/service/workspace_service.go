@@ -306,7 +306,8 @@ const plainStreamChunkSize = 6
 
 // streamPlainText 把已经拿到的完整文本按固定大小切片、间隔推送，模拟流式打字机效果，
 // 用于"内容已经通过一次非流式调用生成完毕，只需要以流式 UI 呈现"的场景。
-func (s *WorkspaceServer) streamPlainText(ctx context.Context, stream agenteamv1.WorkspaceService_SendMessageStreamServer, teamID, agentID, text string) error {
+func (s *WorkspaceServer) streamPlainText(ctx context.Context, stream agenteamv1.WorkspaceService_SendMessageStreamServer,
+	teamID, agentID, text string) error {
 	runes := []rune(text)
 	for i := 0; i < len(runes); i += plainStreamChunkSize {
 		end := min(i+plainStreamChunkSize, len(runes))
