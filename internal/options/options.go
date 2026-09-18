@@ -79,3 +79,6 @@ func IsValidSkill(id string) bool { return skillIDs()[id] }
 
 // DefaultModel 是新建 Agent（含主 Agent 与子 Agent）时的默认模型。
 var DefaultModel = deepseek.DeepSeekChat
+
+// DefaultMcpToolTimeoutSeconds 是用户接入自定义 MCP 工具时，未显式指定超时的默认值（秒）。
+const DefaultMcpToolTimeoutSeconds int32 = 30

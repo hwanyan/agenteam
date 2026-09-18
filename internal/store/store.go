@@ -23,6 +23,9 @@ var ErrNotFound = errors.New("not found")
 // 不允许通过 DeleteAgent 单独删除，只能随 DeleteTeam 一起删除。
 var ErrMainAgentProtected = errors.New("main agent cannot be deleted individually")
 
+// ErrAlreadyExists 表示尝试创建的资源 id 已存在（如自定义 MCP 工具 id 冲突）。
+var ErrAlreadyExists = errors.New("already exists")
+
 // Store 是业务层依赖的统一存储接口。
 type Store interface {
 	// CreateTeam 原子性地创建团队及其主 Agent（两者互相引用，需保证一致性）。
@@ -47,9 +50,18 @@ type Store interface {
 	AppendMessage(ctx context.Context, msg *pb.ChatMessage) error
 	// ListMessages 返回指定团队的历史聊天记录，按时间升序排列。
 	ListMessages(ctx context.Context, teamID string) ([]*pb.ChatMessage, error)
+
+	// CreateMcpTool 接入一个自定义 MCP 工具；tool.Id 为空时由存储层生成
+	// "mcp_tool_<序号>" 形式的 id 并写回 tool.Id。apiKey 为明文，仅落库使用，
+	// 任何查询接口都不会回显（对应 tool.ApiKeySet 只读标记）。若 id 与已存在的
+	// 自定义工具冲突，返回 ErrAlreadyExists。
+	CreateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey string) error
+	// ListMcpTools 返回全部已接入的自定义 MCP 工具（不含 internal/options 提供的
+	// 平台内置静态清单），按创建时间升序排列。
+	ListMcpTools(ctx context.Context) ([]*pb.McpTool, error)
 }
 
-// TeamAgentStore 是 Store 中“团队 / Agent”相关能力的子接口，由 PostgreSQL 实现。
+// TeamAgentStore 是 Store 中“团队 / Agent / 自定义 MCP 工具”相关能力的子接口，由 PostgreSQL 实现。
 type TeamAgentStore interface {
 	CreateTeam(ctx context.Context, team *pb.Team, mainAgent *pb.Agent) error
 	GetTeam(ctx context.Context, id string) (*pb.Team, error)
@@ -60,6 +72,8 @@ type TeamAgentStore interface {
 	GetAgent(ctx context.Context, id string) (*pb.Agent, error)
 	ListAgentsByTeam(ctx context.Context, teamID string) ([]*pb.Agent, error)
 	DeleteAgent(ctx context.Context, id string) error
+	CreateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey string) error
+	ListMcpTools(ctx context.Context) ([]*pb.McpTool, error)
 }
 
 // MessageStore 是 Store 中“聊天记录”相关能力的子接口，由 MongoDB 实现。
@@ -127,4 +141,12 @@ func (c *composite) AppendMessage(ctx context.Context, msg *pb.ChatMessage) erro
 
 func (c *composite) ListMessages(ctx context.Context, teamID string) ([]*pb.ChatMessage, error) {
 	return c.messages.ListMessages(ctx, teamID)
+}
+
+func (c *composite) CreateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey string) error {
+	return c.teams.CreateMcpTool(ctx, tool, apiKey)
+}
+
+func (c *composite) ListMcpTools(ctx context.Context) ([]*pb.McpTool, error) {
+	return c.teams.ListMcpTools(ctx)
 }

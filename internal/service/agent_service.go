@@ -9,9 +9,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hwanyan/agenteam/internal/a2a"
-	"github.com/hwanyan/agenteam/internal/idgen"
 	"github.com/hwanyan/agenteam/internal/options"
 	"github.com/hwanyan/agenteam/internal/store"
+	"github.com/hwanyan/agenteam/internal/tools"
 	agenteamv1 "github.com/hwanyan/agenteam/pb/gen"
 )
 
@@ -70,7 +70,7 @@ func (s *AgentServer) CreateAgent(ctx context.Context, req *agenteamv1.CreateAge
 
 	now := time.Now().Unix()
 	agent := &agenteamv1.Agent{
-		Id:        idgen.New("agent"),
+		Id:        tools.New("agent"),
 		TeamId:    req.TeamId,
 		Name:      req.Name,
 		IsMain:    false,
@@ -233,14 +233,76 @@ func (s *AgentServer) ListModelOptions(_ context.Context, _ *agenteamv1.ListMode
 	return &agenteamv1.ListModelOptionsResponse{Models: options.Models()}, nil
 }
 
-// ListMcpToolOptions 返回可选的 MCP 工具清单。
-func (s *AgentServer) ListMcpToolOptions(_ context.Context, _ *agenteamv1.ListMcpToolOptionsRequest) (*agenteamv1.ListMcpToolOptionsResponse, error) {
-	return &agenteamv1.ListMcpToolOptionsResponse{Tools: options.MCPTools()}, nil
+// ListMcpToolOptions 返回可选的 MCP 工具清单：平台内置静态清单
+// （internal/options.MCPTools()）与用户自行接入的自定义 MCP 工具（Store.ListMcpTools）
+// 合并后的结果；自定义工具的 Description 展示其 base_url，方便用户识别。
+func (s *AgentServer) ListMcpToolOptions(ctx context.Context, _ *agenteamv1.ListMcpToolOptionsRequest) (*agenteamv1.ListMcpToolOptionsResponse, error) {
+	merged := append([]*agenteamv1.ToolOption{}, options.MCPTools()...)
+	custom, err := s.Store.ListMcpTools(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "查询自定义 MCP 工具失败: %v", err)
+	}
+	for _, t := range custom {
+		merged = append(merged, &agenteamv1.ToolOption{Id: t.Id, Name: t.Name, Description: t.BaseUrl})
+	}
+	return &agenteamv1.ListMcpToolOptionsResponse{Tools: merged}, nil
 }
 
 // ListSkillOptions 返回可选的 Skill 清单。
 func (s *AgentServer) ListSkillOptions(_ context.Context, _ *agenteamv1.ListSkillOptionsRequest) (*agenteamv1.ListSkillOptionsResponse, error) {
 	return &agenteamv1.ListSkillOptionsResponse{Skills: options.Skills()}, nil
+}
+
+// CreateMcpTool 接入一个新的自定义 MCP 工具；成功后会与内置工具合并出现在
+// ListMcpToolOptions 返回的可选清单中，供任意团队的 Agent 选择绑定
+// （全局共享，不归属于某个团队/Agent）。
+//
+// 字段规则：
+//   - id 不对外开放指定入口，始终由服务端通过 internal/tools.NewMCPToolID 生成
+//     "mcp-tool-<6位随机数字/字母>" 形式的 id（如 "mcp-tool-sc1so3"）。
+//   - name / base_url 必填。
+//   - api_key 非必填；服务端不会在任何响应中回显明文，只反映 ApiKeySet 标记。
+//   - timeout_seconds 非必填，留空(0)则默认 30 秒。
+func (s *AgentServer) CreateMcpTool(ctx context.Context, req *agenteamv1.CreateMcpToolRequest) (*agenteamv1.CreateMcpToolResponse, error) {
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "MCP 工具名称不能为空")
+	}
+	if req.BaseUrl == "" {
+		return nil, status.Error(codes.InvalidArgument, "base_url 不能为空")
+	}
+
+	timeout := req.TimeoutSeconds
+	if timeout <= 0 {
+		timeout = options.DefaultMcpToolTimeoutSeconds
+	}
+
+	now := time.Now().Unix()
+	tool := &agenteamv1.McpTool{
+		Name:           req.Name,
+		BaseUrl:        req.BaseUrl,
+		TimeoutSeconds: timeout,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+
+	// id 始终由 tools.NewMCPToolID 随机生成（36^6 ≈ 21.8 亿的随机空间，
+	// 理论上仍存在极小概率的冲突），遇到冲突（store.ErrAlreadyExists）时重新生成并重试。
+	const maxAutoIDAttempts = 10
+	for attempt := 1; ; attempt++ {
+		tool.Id = tools.NewMCPToolID("mcp-tool")
+		err := s.Store.CreateMcpTool(ctx, tool, req.ApiKey)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, store.ErrAlreadyExists) {
+			return nil, status.Errorf(codes.Internal, "接入 MCP 工具失败: %v", err)
+		}
+		if attempt >= maxAutoIDAttempts {
+			return nil, status.Errorf(codes.Internal, "生成唯一 id 失败，请重试: %v", err)
+		}
+	}
+	tool.ApiKeySet = req.ApiKey != ""
+	return &agenteamv1.CreateMcpToolResponse{Tool: tool}, nil
 }
 
 func agentNotFoundOrErr(err error) error {

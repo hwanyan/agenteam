@@ -19,7 +19,7 @@ internal/a2a                 A2A（Agent2Agent）协议客户端：Agent Card �
 internal/config              统一配置加载：从环境变量读取所有配置项（含 DeepSeek API Key）
 internal/options             可选模型 / MCP 工具 / Skill 的静态清单
 internal/service             gRPC 服务实现（TeamService / AgentService / WorkspaceService）
-internal/idgen               简单唯一 ID 生成
+internal/tools                简单唯一 ID 生成（New / NewMCPToolID）
 pb/proto                     proto 源文件
 pb/gen                       生成的 Go pb 代码（含 grpc-gateway）
 scripts/                     数据库初始化脚本与本地开发 docker-compose（详见 scripts/README.md）

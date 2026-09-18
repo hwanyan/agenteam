@@ -74,6 +74,15 @@ service AgentService {
       get: "/v1/options/skills"
     };
   }
+
+  // 接入一个新的自定义 MCP 工具；成功后会与内置工具合并出现在 ListMcpToolOptions
+  // 返回的可选清单中，供任意团队的 Agent 选择绑定（全局共享，不归属于某个团队/Agent）。
+  rpc CreateMcpTool(CreateMcpToolRequest) returns (CreateMcpToolResponse) {
+    option (google.api.http) = {
+      post: "/v1/mcp-tools"
+      body: "*"
+    };
+  }
 }
 
 message GetAgentRequest {
@@ -158,4 +167,17 @@ message ListSkillOptionsRequest {}
 
 message ListSkillOptionsResponse {
   repeated ToolOption skills = 1;
+}
+
+message CreateMcpToolRequest {
+  // id 由服务端通过 internal/tools.NewMCPToolID 生成
+  // "mcp-tool-<6位随机数字/字母>" 形式的 id，不再对外开放指定入口
+  string name = 1;              // 必填
+  string base_url = 2;          // 必填
+  string api_key = 3;           // 非必填
+  int32 timeout_seconds = 4;    // 非必填；留空(0)则由服务端默认设置为 30 秒
+}
+
+message CreateMcpToolResponse {
+  McpTool tool = 1;
 }

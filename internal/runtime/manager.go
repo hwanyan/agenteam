@@ -20,15 +20,25 @@ import (
 	agenteamv1 "github.com/hwanyan/agenteam/pb/gen"
 )
 
-// Manager 管理所有已加载的 Agent 运行态，底层由 Redis 承载。
-type Manager struct {
-	cache cache.AgentCache
-	a2a   *a2a.Client
+// mcpToolLister 是 Manager 校验自定义 MCP 工具 id 合法性时依赖的最小接口
+// （只声明 Load 校验环节真正需要的方法，而非直接依赖完整的 store.Store，
+// 保持 runtime 包职责单一、便于测试替身）。store.Store 已实现该方法，
+// main.go 中可直接把组合好的 store.Store 传给 New。
+type mcpToolLister interface {
+	ListMcpTools(ctx context.Context) ([]*agenteamv1.McpTool, error)
 }
 
-// New 创建一个 Manager。
-func New(c cache.AgentCache) *Manager {
-	return &Manager{cache: c, a2a: a2a.New()}
+// Manager 管理所有已加载的 Agent 运行态，底层由 Redis 承载。
+type Manager struct {
+	cache    cache.AgentCache
+	a2a      *a2a.Client
+	mcpTools mcpToolLister
+}
+
+// New 创建一个 Manager。mcpTools 用于在校验 Agent.McpTools 时识别用户自行接入的
+// 自定义 MCP 工具 id（内置静态清单以外的部分），不能为 nil。
+func New(c cache.AgentCache, mcpTools mcpToolLister) *Manager {
+	return &Manager{cache: c, a2a: a2a.New(), mcpTools: mcpTools}
 }
 
 // Load 校验并加载给定的 Agent 配置，成功后置为 LOADED 状态、版本号自增，
@@ -39,7 +49,7 @@ func New(c cache.AgentCache) *Manager {
 // Agent Card 发现请求以校验连通性，并将对端回填的名称/描述/技能/流式能力写回
 // agent.A2aConfig 的只读字段。
 func (m *Manager) Load(ctx context.Context, agent *agenteamv1.Agent) (*agenteamv1.Agent, error) {
-	if err := validate(agent); err != nil {
+	if err := m.validate(ctx, agent); err != nil {
 		agent.Status = agenteamv1.AgentStatus_AGENT_STATUS_ERROR
 		return agent, err
 	}
@@ -172,10 +182,12 @@ func fromSnapshot(s *cache.AgentSnapshot) *agenteamv1.Agent {
 
 // validate 按 Agent.Kind 校验配置合法性：
 //   - AGENT_KIND_PROMPT（默认，含未指定 kind 的兼容旧数据场景）：沿用原有的
-//     name/prompt/model/mcp_tools/skills 校验。
+//     name/prompt/model/mcp_tools/skills 校验；mcp_tools 除平台内置静态清单
+//     （internal/options.MCPTools()）外，还接受用户自行接入的自定义 MCP 工具 id
+//     （通过 m.mcpTools 动态查询，见 store.Store.ListMcpTools）。
 //   - AGENT_KIND_A2A：只校验 name 与 endpoint_url，其余 prompt 相关字段对该
 //     方式无意义，允许为空；真正的连通性校验发生在 discoverAndFillA2A 中。
-func validate(agent *agenteamv1.Agent) error {
+func (m *Manager) validate(ctx context.Context, agent *agenteamv1.Agent) error {
 	if agent.Name == "" {
 		return fmt.Errorf("agent 名称不能为空")
 	}
@@ -194,9 +206,19 @@ func validate(agent *agenteamv1.Agent) error {
 	if !options.IsValidModel(agent.Model) {
 		return fmt.Errorf("不支持的模型: %s", agent.Model)
 	}
-	for _, t := range agent.McpTools {
-		if !options.IsValidTool(t) {
-			return fmt.Errorf("不支持的 MCP 工具: %s", t)
+	if len(agent.McpTools) > 0 {
+		custom, err := m.mcpTools.ListMcpTools(ctx)
+		if err != nil {
+			return fmt.Errorf("查询自定义 MCP 工具失败: %w", err)
+		}
+		customIDs := make(map[string]bool, len(custom))
+		for _, t := range custom {
+			customIDs[t.Id] = true
+		}
+		for _, t := range agent.McpTools {
+			if !options.IsValidTool(t) && !customIDs[t] {
+				return fmt.Errorf("不支持的 MCP 工具: %s", t)
+			}
 		}
 	}
 	for _, s := range agent.Skills {

@@ -11,9 +11,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hwanyan/agenteam/internal/a2a"
-	"github.com/hwanyan/agenteam/internal/idgen"
 	"github.com/hwanyan/agenteam/internal/llm"
 	"github.com/hwanyan/agenteam/internal/options"
+	"github.com/hwanyan/agenteam/internal/tools"
 	agenteamv1 "github.com/hwanyan/agenteam/pb/gen"
 )
 
@@ -64,7 +64,7 @@ func (s *WorkspaceServer) SendMessage(ctx context.Context, req *agenteamv1.SendM
 
 	now := time.Now().Unix()
 	userMsg := &agenteamv1.ChatMessage{
-		Id:        idgen.New("msg"),
+		Id:        tools.New("msg"),
 		TeamId:    team.Id,
 		AgentId:   agent.Id,
 		Role:      agenteamv1.MessageRole_MESSAGE_ROLE_USER,
@@ -86,7 +86,7 @@ func (s *WorkspaceServer) SendMessage(ctx context.Context, req *agenteamv1.SendM
 	}
 
 	agentMsg := &agenteamv1.ChatMessage{
-		Id:        idgen.New("msg"),
+		Id:        tools.New("msg"),
 		TeamId:    team.Id,
 		AgentId:   agent.Id,
 		Role:      agenteamv1.MessageRole_MESSAGE_ROLE_AGENT,
@@ -121,10 +121,10 @@ func (s *WorkspaceServer) replyFor(ctx context.Context, agent *agenteamv1.Agent,
 		return reply, nil
 	}
 
-	// tools 是将提供给主 Agent 进行请求委派给团队内某个子 Agent 的工具
+	// delegationTools 是将提供给主 Agent 进行请求委派给团队内某个子 Agent 的工具
 	// note 是需要追加到 system prompt 中的可协作 Agent 清单文本
 	// siblings 是 team 内除主 Agent 之外的其他子 Agent 信息
-	tools, note, siblings, err := s.resolveDelegationTools(ctx, agent)
+	delegationTools, note, siblings, err := s.resolveDelegationTools(ctx, agent)
 	if err != nil {
 		return "", status.Errorf(codes.Internal, "查询团队 Agent 列表失败: %v", err)
 	}
@@ -134,7 +134,7 @@ func (s *WorkspaceServer) replyFor(ctx context.Context, agent *agenteamv1.Agent,
 		SystemPrompt: composeSystemPrompt(agent, note),
 		History:      buildHistory(history),
 		UserMessage:  content,
-		Tools:        tools,
+		Tools:        delegationTools,
 	})
 	if err != nil {
 		return "", status.Errorf(codes.Unavailable, "调用模型失败: %v", err)
@@ -187,7 +187,7 @@ func (s *WorkspaceServer) SendMessageStream(req *agenteamv1.SendMessageRequest, 
 
 	now := time.Now().Unix()
 	userMsg := &agenteamv1.ChatMessage{
-		Id:        idgen.New("msg"),
+		Id:        tools.New("msg"),
 		TeamId:    team.Id,
 		AgentId:   agent.Id,
 		Role:      agenteamv1.MessageRole_MESSAGE_ROLE_USER,
@@ -214,11 +214,11 @@ func (s *WorkspaceServer) SendMessageStream(req *agenteamv1.SendMessageRequest, 
 		return s.streamA2AReply(ctx, stream, team.Id, agent, content, "")
 	}
 
-	tools, note, siblings, err := s.resolveDelegationTools(ctx, agent)
+	delegationTools, note, siblings, err := s.resolveDelegationTools(ctx, agent)
 	if err != nil {
 		return status.Errorf(codes.Internal, "查询团队 Agent 列表失败: %v", err)
 	}
-	if len(tools) > 0 {
+	if len(delegationTools) > 0 {
 		// 团队内还存在其他可协作的 Agent：先做一次非流式的"路由决策"调用，
 		// 让主 Agent 判断本次请求是否应转交给某个更专业的子 Agent；若决定委派，
 		// 则实时流式转发该子 Agent 的真实回答，而不是让主 Agent 自己勉强作答
@@ -230,7 +230,7 @@ func (s *WorkspaceServer) SendMessageStream(req *agenteamv1.SendMessageRequest, 
 			SystemPrompt: composeSystemPrompt(agent, note),
 			History:      history,
 			UserMessage:  content,
-			Tools:        tools,
+			Tools:        delegationTools,
 		})
 		if err != nil {
 			return status.Errorf(codes.Unavailable, "调用模型失败: %v", err)
@@ -331,7 +331,7 @@ func (s *WorkspaceServer) streamPlainText(ctx context.Context, stream agenteamv1
 func (s *WorkspaceServer) persistAgentReply(ctx context.Context, teamID, agentID, content string) (
 	*agenteamv1.ChatMessage, error) {
 	agentMsg := &agenteamv1.ChatMessage{
-		Id:        idgen.New("msg"),
+		Id:        tools.New("msg"),
 		TeamId:    teamID,
 		AgentId:   agentID,
 		Role:      agenteamv1.MessageRole_MESSAGE_ROLE_AGENT,

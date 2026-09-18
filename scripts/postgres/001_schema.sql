@@ -68,4 +68,21 @@ ALTER TABLE teams
 CREATE INDEX IF NOT EXISTS idx_agents_team_id ON agents (team_id);
 CREATE INDEX IF NOT EXISTS idx_teams_created_at ON teams (created_at);
 
+-- 自定义 MCP 工具：全局共享、不归属于某个团队/Agent，与内置静态清单
+-- （internal/options.MCPTools()）合并后供任意 Agent 选择绑定。
+-- id 为空时由服务端（internal/service.AgentServer.CreateMcpTool）通过
+-- internal/tools.NewMCPToolID 生成 "mcp-tool-<6位随机数字/字母>" 形式的默认值
+-- 后再落库，本表不负责生成默认 id。
+CREATE TABLE IF NOT EXISTS mcp_tools (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    base_url        TEXT NOT NULL,
+    api_key         TEXT NOT NULL DEFAULT '',
+    timeout_seconds INTEGER NOT NULL DEFAULT 30,
+    created_at      BIGINT NOT NULL,
+    updated_at      BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_tools_created_at ON mcp_tools (created_at);
+
 COMMIT;

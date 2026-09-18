@@ -28,6 +28,7 @@ const (
 	AgentService_ListModelOptions_FullMethodName   = "/agenteam.v1.AgentService/ListModelOptions"
 	AgentService_ListMcpToolOptions_FullMethodName = "/agenteam.v1.AgentService/ListMcpToolOptions"
 	AgentService_ListSkillOptions_FullMethodName   = "/agenteam.v1.AgentService/ListSkillOptions"
+	AgentService_CreateMcpTool_FullMethodName      = "/agenteam.v1.AgentService/CreateMcpTool"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -54,6 +55,9 @@ type AgentServiceClient interface {
 	ListModelOptions(ctx context.Context, in *ListModelOptionsRequest, opts ...grpc.CallOption) (*ListModelOptionsResponse, error)
 	ListMcpToolOptions(ctx context.Context, in *ListMcpToolOptionsRequest, opts ...grpc.CallOption) (*ListMcpToolOptionsResponse, error)
 	ListSkillOptions(ctx context.Context, in *ListSkillOptionsRequest, opts ...grpc.CallOption) (*ListSkillOptionsResponse, error)
+	// 接入一个新的自定义 MCP 工具；成功后会与内置工具合并出现在 ListMcpToolOptions
+	// 返回的可选清单中，供任意团队的 Agent 选择绑定（全局共享，不归属于某个团队/Agent）。
+	CreateMcpTool(ctx context.Context, in *CreateMcpToolRequest, opts ...grpc.CallOption) (*CreateMcpToolResponse, error)
 }
 
 type agentServiceClient struct {
@@ -154,6 +158,16 @@ func (c *agentServiceClient) ListSkillOptions(ctx context.Context, in *ListSkill
 	return out, nil
 }
 
+func (c *agentServiceClient) CreateMcpTool(ctx context.Context, in *CreateMcpToolRequest, opts ...grpc.CallOption) (*CreateMcpToolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateMcpToolResponse)
+	err := c.cc.Invoke(ctx, AgentService_CreateMcpTool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -178,6 +192,9 @@ type AgentServiceServer interface {
 	ListModelOptions(context.Context, *ListModelOptionsRequest) (*ListModelOptionsResponse, error)
 	ListMcpToolOptions(context.Context, *ListMcpToolOptionsRequest) (*ListMcpToolOptionsResponse, error)
 	ListSkillOptions(context.Context, *ListSkillOptionsRequest) (*ListSkillOptionsResponse, error)
+	// 接入一个新的自定义 MCP 工具；成功后会与内置工具合并出现在 ListMcpToolOptions
+	// 返回的可选清单中，供任意团队的 Agent 选择绑定（全局共享，不归属于某个团队/Agent）。
+	CreateMcpTool(context.Context, *CreateMcpToolRequest) (*CreateMcpToolResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -214,6 +231,9 @@ func (UnimplementedAgentServiceServer) ListMcpToolOptions(context.Context, *List
 }
 func (UnimplementedAgentServiceServer) ListSkillOptions(context.Context, *ListSkillOptionsRequest) (*ListSkillOptionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSkillOptions not implemented")
+}
+func (UnimplementedAgentServiceServer) CreateMcpTool(context.Context, *CreateMcpToolRequest) (*CreateMcpToolResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateMcpTool not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -398,6 +418,24 @@ func _AgentService_ListSkillOptions_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_CreateMcpTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateMcpToolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).CreateMcpTool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_CreateMcpTool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).CreateMcpTool(ctx, req.(*CreateMcpToolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -440,6 +478,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListSkillOptions",
 			Handler:    _AgentService_ListSkillOptions_Handler,
+		},
+		{
+			MethodName: "CreateMcpTool",
+			Handler:    _AgentService_CreateMcpTool_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

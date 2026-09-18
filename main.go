@@ -70,10 +70,9 @@ func main() {
 	log.Printf("connected to Redis")
 
 	st := store.New(pgStore, msgStore)
-
 	deps := &service.Deps{
 		Store:   st,
-		Runtime: agentruntime.New(agentCache),
+		Runtime: agentruntime.New(agentCache, st),
 		LLM:     llm.New(cfg.DeepSeekAPIKey, cfg.DeepSeekBaseURL),
 		A2A:     a2a.New(),
 	}

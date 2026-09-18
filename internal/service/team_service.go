@@ -8,9 +8,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/hwanyan/agenteam/internal/idgen"
 	"github.com/hwanyan/agenteam/internal/options"
 	"github.com/hwanyan/agenteam/internal/store"
+	"github.com/hwanyan/agenteam/internal/tools"
 	agenteamv1 "github.com/hwanyan/agenteam/pb/gen"
 )
 
@@ -46,8 +46,8 @@ func (s *TeamServer) CreateTeam(ctx context.Context, req *agenteamv1.CreateTeamR
 	}
 
 	now := time.Now().Unix()
-	teamID := idgen.New("team")
-	agentID := idgen.New("agent")
+	teamID := tools.New("team")
+	agentID := tools.New("agent")
 
 	agent := &agenteamv1.Agent{
 		Id:        agentID,

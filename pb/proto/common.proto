@@ -101,3 +101,17 @@ message ToolOption {
   string name = 2;
   string description = 3;
 }
+
+// McpTool 是用户自行接入的自定义 MCP 工具（区别于 internal/options.MCPTools() 提供的
+// 平台内置静态清单）：创建成功后会与内置工具合并出现在 ListMcpToolOptions 的返回结果中
+// （以 ToolOption 形式，Description 取 base_url），可供任意团队的 Agent 选择绑定，
+// 全局共享、不归属于某个团队/Agent。
+message McpTool {
+  string id = 1;              // 唯一标识；创建时留空则由服务端生成 "mcp_tool_<序号>" 形式的 id
+  string name = 2;             // 展示名称
+  string base_url = 3;         // MCP 服务地址
+  bool api_key_set = 4;        // 只读：是否已配置 API Key（不回显明文，避免密钥随查询接口泄露）
+  int32 timeout_seconds = 5;   // 调用超时时间（秒）；创建时留空(0)则由服务端默认设置为 30
+  int64 created_at = 6;
+  int64 updated_at = 7;
+}

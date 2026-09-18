@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hwanyan/agenteam/internal/idgen"
+	"github.com/hwanyan/agenteam/internal/tools"
 )
 
 // agentCardPath 是 A2A 规范约定的 Agent Card 发现路径。
@@ -185,11 +185,11 @@ func (c *Client) SendMessage(ctx context.Context, cfg Config, content string) (s
 
 	rpcReq := jsonrpcRequest{
 		JSONRPC: "2.0",
-		ID:      idgen.New("a2a-req"),
+		ID:      tools.New("a2a-req"),
 		Method:  "message/send",
 		Params: sendMessageParams{
 			Message: a2aMessage{
-				MessageID: idgen.New("a2a-msg"),
+				MessageID: tools.New("a2a-msg"),
 				Role:      "user",
 				Parts:     []messagePart{{Kind: "text", Text: content}},
 			},
@@ -403,11 +403,11 @@ func (c *Client) SendMessageStream(ctx context.Context, cfg Config, content stri
 
 	rpcReq := jsonrpcRequest{
 		JSONRPC: "2.0",
-		ID:      idgen.New("a2a-req"),
+		ID:      tools.New("a2a-req"),
 		Method:  "message/stream",
 		Params: sendMessageParams{
 			Message: a2aMessage{
-				MessageID: idgen.New("a2a-msg"),
+				MessageID: tools.New("a2a-msg"),
 				Role:      "user",
 				Parts:     []messagePart{{Kind: "text", Text: content}},
 			},
