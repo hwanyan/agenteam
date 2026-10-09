@@ -51,14 +51,21 @@ type Store interface {
 	// ListMessages 返回指定团队的历史聊天记录，按时间升序排列。
 	ListMessages(ctx context.Context, teamID string) ([]*pb.ChatMessage, error)
 
-	// CreateMcpTool 接入一个自定义 MCP 工具；tool.Id 为空时由存储层生成
-	// "mcp_tool_<序号>" 形式的 id 并写回 tool.Id。apiKey 为明文，仅落库使用，
-	// 任何查询接口都不会回显（对应 tool.ApiKeySet 只读标记）。若 id 与已存在的
+	// CreateMcpTool 在指定团队下接入一个自定义 MCP 工具；tool.Id 必须由调用方
+	// （internal/service，通过 internal/tools.NewMCPToolID）预先生成好。apiKey 为明文，
+	// 仅落库使用，任何查询接口都不会回显（对应 tool.ApiKeySet 只读标记）。若 id 与已存在的
 	// 自定义工具冲突，返回 ErrAlreadyExists。
 	CreateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey string) error
-	// ListMcpTools 返回全部已接入的自定义 MCP 工具（不含 internal/options 提供的
-	// 平台内置静态清单），按创建时间升序排列。
-	ListMcpTools(ctx context.Context) ([]*pb.McpTool, error)
+	// ListMcpToolsByTeam 返回指定团队下已接入的全部自定义 MCP 工具（不含
+	// internal/options 提供的平台内置静态清单），按创建时间升序排列。
+	// 自定义 MCP 工具按团队隔离，不同团队互不可见。
+	ListMcpToolsByTeam(ctx context.Context, teamID string) ([]*pb.McpTool, error)
+	// GetMcpTool 按 id 查询单个自定义 MCP 工具（含明文 api_key，仅供服务层内部读取/更新时
+	// 判断"是否需要保留现有密钥"使用；对外响应前必须调用方自行脱敏）。
+	GetMcpTool(ctx context.Context, id string) (*pb.McpTool, string, error)
+	// UpdateMcpTool 更新一个自定义 MCP 工具的配置；apiKey 为空指针表示"不修改现有密钥"，
+	// 非空则覆盖为新值（区分"传空字符串以清空密钥"与"未提供密钥"两种语义）。
+	UpdateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey *string) error
 }
 
 // TeamAgentStore 是 Store 中“团队 / Agent / 自定义 MCP 工具”相关能力的子接口，由 PostgreSQL 实现。
@@ -73,7 +80,9 @@ type TeamAgentStore interface {
 	ListAgentsByTeam(ctx context.Context, teamID string) ([]*pb.Agent, error)
 	DeleteAgent(ctx context.Context, id string) error
 	CreateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey string) error
-	ListMcpTools(ctx context.Context) ([]*pb.McpTool, error)
+	ListMcpToolsByTeam(ctx context.Context, teamID string) ([]*pb.McpTool, error)
+	GetMcpTool(ctx context.Context, id string) (*pb.McpTool, string, error)
+	UpdateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey *string) error
 }
 
 // MessageStore 是 Store 中“聊天记录”相关能力的子接口，由 MongoDB 实现。
@@ -147,6 +156,14 @@ func (c *composite) CreateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey 
 	return c.teams.CreateMcpTool(ctx, tool, apiKey)
 }
 
-func (c *composite) ListMcpTools(ctx context.Context) ([]*pb.McpTool, error) {
-	return c.teams.ListMcpTools(ctx)
+func (c *composite) ListMcpToolsByTeam(ctx context.Context, teamID string) ([]*pb.McpTool, error) {
+	return c.teams.ListMcpToolsByTeam(ctx, teamID)
+}
+
+func (c *composite) GetMcpTool(ctx context.Context, id string) (*pb.McpTool, string, error) {
+	return c.teams.GetMcpTool(ctx, id)
+}
+
+func (c *composite) UpdateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey *string) error {
+	return c.teams.UpdateMcpTool(ctx, tool, apiKey)
 }

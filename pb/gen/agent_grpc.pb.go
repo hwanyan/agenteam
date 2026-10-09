@@ -29,6 +29,8 @@ const (
 	AgentService_ListMcpToolOptions_FullMethodName = "/agenteam.v1.AgentService/ListMcpToolOptions"
 	AgentService_ListSkillOptions_FullMethodName   = "/agenteam.v1.AgentService/ListSkillOptions"
 	AgentService_CreateMcpTool_FullMethodName      = "/agenteam.v1.AgentService/CreateMcpTool"
+	AgentService_GetMcpTool_FullMethodName         = "/agenteam.v1.AgentService/GetMcpTool"
+	AgentService_UpdateMcpTool_FullMethodName      = "/agenteam.v1.AgentService/UpdateMcpTool"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -53,11 +55,19 @@ type AgentServiceClient interface {
 	// 只能随 DeleteTeam 一起删除。
 	DeleteAgent(ctx context.Context, in *DeleteAgentRequest, opts ...grpc.CallOption) (*DeleteAgentResponse, error)
 	ListModelOptions(ctx context.Context, in *ListModelOptionsRequest, opts ...grpc.CallOption) (*ListModelOptionsResponse, error)
+	// 返回可选的 MCP 工具清单：平台内置静态清单 + 指定团队（team_id 作为查询参数，
+	// 如 ?team_id=xxx）自行接入的自定义 MCP 工具（按团队隔离，不同团队互不可见）。
+	// team_id 留空（如"新增团队"表单场景，团队尚未创建）时只返回内置静态清单。
 	ListMcpToolOptions(ctx context.Context, in *ListMcpToolOptionsRequest, opts ...grpc.CallOption) (*ListMcpToolOptionsResponse, error)
 	ListSkillOptions(ctx context.Context, in *ListSkillOptionsRequest, opts ...grpc.CallOption) (*ListSkillOptionsResponse, error)
-	// 接入一个新的自定义 MCP 工具；成功后会与内置工具合并出现在 ListMcpToolOptions
-	// 返回的可选清单中，供任意团队的 Agent 选择绑定（全局共享，不归属于某个团队/Agent）。
+	// 在指定团队下接入一个新的自定义 MCP 工具；成功后会与内置工具合并出现在该团队的
+	// ListMcpToolOptions 返回的可选清单中，仅供该团队的 Agent 选择绑定（按团队隔离）。
 	CreateMcpTool(ctx context.Context, in *CreateMcpToolRequest, opts ...grpc.CallOption) (*CreateMcpToolResponse, error)
+	// 查询单个自定义 MCP 工具的详情（供编辑表单回填；api_key 不回显明文，只有 api_key_set 标记）。
+	GetMcpTool(ctx context.Context, in *GetMcpToolRequest, opts ...grpc.CallOption) (*GetMcpToolResponse, error)
+	// 更新一个自定义 MCP 工具的配置信息；api_key 为空表示"不修改现有密钥"，非空则覆盖
+	// （与 UpdateAgent 对 A2A auth_token 的处理方式一致，避免每次保存都必须回传明文密钥）。
+	UpdateMcpTool(ctx context.Context, in *UpdateMcpToolRequest, opts ...grpc.CallOption) (*UpdateMcpToolResponse, error)
 }
 
 type agentServiceClient struct {
@@ -168,6 +178,26 @@ func (c *agentServiceClient) CreateMcpTool(ctx context.Context, in *CreateMcpToo
 	return out, nil
 }
 
+func (c *agentServiceClient) GetMcpTool(ctx context.Context, in *GetMcpToolRequest, opts ...grpc.CallOption) (*GetMcpToolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetMcpToolResponse)
+	err := c.cc.Invoke(ctx, AgentService_GetMcpTool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) UpdateMcpTool(ctx context.Context, in *UpdateMcpToolRequest, opts ...grpc.CallOption) (*UpdateMcpToolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateMcpToolResponse)
+	err := c.cc.Invoke(ctx, AgentService_UpdateMcpTool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -190,11 +220,19 @@ type AgentServiceServer interface {
 	// 只能随 DeleteTeam 一起删除。
 	DeleteAgent(context.Context, *DeleteAgentRequest) (*DeleteAgentResponse, error)
 	ListModelOptions(context.Context, *ListModelOptionsRequest) (*ListModelOptionsResponse, error)
+	// 返回可选的 MCP 工具清单：平台内置静态清单 + 指定团队（team_id 作为查询参数，
+	// 如 ?team_id=xxx）自行接入的自定义 MCP 工具（按团队隔离，不同团队互不可见）。
+	// team_id 留空（如"新增团队"表单场景，团队尚未创建）时只返回内置静态清单。
 	ListMcpToolOptions(context.Context, *ListMcpToolOptionsRequest) (*ListMcpToolOptionsResponse, error)
 	ListSkillOptions(context.Context, *ListSkillOptionsRequest) (*ListSkillOptionsResponse, error)
-	// 接入一个新的自定义 MCP 工具；成功后会与内置工具合并出现在 ListMcpToolOptions
-	// 返回的可选清单中，供任意团队的 Agent 选择绑定（全局共享，不归属于某个团队/Agent）。
+	// 在指定团队下接入一个新的自定义 MCP 工具；成功后会与内置工具合并出现在该团队的
+	// ListMcpToolOptions 返回的可选清单中，仅供该团队的 Agent 选择绑定（按团队隔离）。
 	CreateMcpTool(context.Context, *CreateMcpToolRequest) (*CreateMcpToolResponse, error)
+	// 查询单个自定义 MCP 工具的详情（供编辑表单回填；api_key 不回显明文，只有 api_key_set 标记）。
+	GetMcpTool(context.Context, *GetMcpToolRequest) (*GetMcpToolResponse, error)
+	// 更新一个自定义 MCP 工具的配置信息；api_key 为空表示"不修改现有密钥"，非空则覆盖
+	// （与 UpdateAgent 对 A2A auth_token 的处理方式一致，避免每次保存都必须回传明文密钥）。
+	UpdateMcpTool(context.Context, *UpdateMcpToolRequest) (*UpdateMcpToolResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -234,6 +272,12 @@ func (UnimplementedAgentServiceServer) ListSkillOptions(context.Context, *ListSk
 }
 func (UnimplementedAgentServiceServer) CreateMcpTool(context.Context, *CreateMcpToolRequest) (*CreateMcpToolResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateMcpTool not implemented")
+}
+func (UnimplementedAgentServiceServer) GetMcpTool(context.Context, *GetMcpToolRequest) (*GetMcpToolResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetMcpTool not implemented")
+}
+func (UnimplementedAgentServiceServer) UpdateMcpTool(context.Context, *UpdateMcpToolRequest) (*UpdateMcpToolResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateMcpTool not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -436,6 +480,42 @@ func _AgentService_CreateMcpTool_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_GetMcpTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMcpToolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).GetMcpTool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_GetMcpTool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).GetMcpTool(ctx, req.(*GetMcpToolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_UpdateMcpTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateMcpToolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).UpdateMcpTool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_UpdateMcpTool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).UpdateMcpTool(ctx, req.(*UpdateMcpToolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -482,6 +562,14 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateMcpTool",
 			Handler:    _AgentService_CreateMcpTool_Handler,
+		},
+		{
+			MethodName: "GetMcpTool",
+			Handler:    _AgentService_GetMcpTool_Handler,
+		},
+		{
+			MethodName: "UpdateMcpTool",
+			Handler:    _AgentService_UpdateMcpTool_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

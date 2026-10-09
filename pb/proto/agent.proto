@@ -63,6 +63,9 @@ service AgentService {
     };
   }
 
+  // 返回可选的 MCP 工具清单：平台内置静态清单 + 指定团队（team_id 作为查询参数，
+  // 如 ?team_id=xxx）自行接入的自定义 MCP 工具（按团队隔离，不同团队互不可见）。
+  // team_id 留空（如"新增团队"表单场景，团队尚未创建）时只返回内置静态清单。
   rpc ListMcpToolOptions(ListMcpToolOptionsRequest) returns (ListMcpToolOptionsResponse) {
     option (google.api.http) = {
       get: "/v1/options/mcp-tools"
@@ -75,11 +78,27 @@ service AgentService {
     };
   }
 
-  // 接入一个新的自定义 MCP 工具；成功后会与内置工具合并出现在 ListMcpToolOptions
-  // 返回的可选清单中，供任意团队的 Agent 选择绑定（全局共享，不归属于某个团队/Agent）。
+  // 在指定团队下接入一个新的自定义 MCP 工具；成功后会与内置工具合并出现在该团队的
+  // ListMcpToolOptions 返回的可选清单中，仅供该团队的 Agent 选择绑定（按团队隔离）。
   rpc CreateMcpTool(CreateMcpToolRequest) returns (CreateMcpToolResponse) {
     option (google.api.http) = {
-      post: "/v1/mcp-tools"
+      post: "/v1/teams/{team_id}/mcp-tools"
+      body: "*"
+    };
+  }
+
+  // 查询单个自定义 MCP 工具的详情（供编辑表单回填；api_key 不回显明文，只有 api_key_set 标记）。
+  rpc GetMcpTool(GetMcpToolRequest) returns (GetMcpToolResponse) {
+    option (google.api.http) = {
+      get: "/v1/mcp-tools/{id}"
+    };
+  }
+
+  // 更新一个自定义 MCP 工具的配置信息；api_key 为空表示"不修改现有密钥"，非空则覆盖
+  // （与 UpdateAgent 对 A2A auth_token 的处理方式一致，避免每次保存都必须回传明文密钥）。
+  rpc UpdateMcpTool(UpdateMcpToolRequest) returns (UpdateMcpToolResponse) {
+    option (google.api.http) = {
+      put: "/v1/mcp-tools/{id}"
       body: "*"
     };
   }
@@ -157,7 +176,9 @@ message ListModelOptionsResponse {
   repeated ModelOption models = 1;
 }
 
-message ListMcpToolOptionsRequest {}
+message ListMcpToolOptionsRequest {
+  string team_id = 1;
+}
 
 message ListMcpToolOptionsResponse {
   repeated ToolOption tools = 1;
@@ -170,14 +191,37 @@ message ListSkillOptionsResponse {
 }
 
 message CreateMcpToolRequest {
-  // id 由服务端通过 internal/tools.NewMCPToolID 生成
-  // "mcp-tool-<6位随机数字/字母>" 形式的 id，不再对外开放指定入口
-  string name = 1;              // 必填
-  string base_url = 2;          // 必填
-  string api_key = 3;           // 非必填
-  int32 timeout_seconds = 4;    // 非必填；留空(0)则由服务端默认设置为 30 秒
+  // id 不对外开放指定入口，始终由服务端通过 internal/tools.NewMCPToolID 生成
+  // "mcp_tool_<6位随机数字/字母>" 形式的 id，因此保留字段号 1 不再使用。
+  reserved 1;
+  reserved "id";
+  string team_id = 2;            // 必填；决定该工具归属哪个团队，仅对该团队可见可选
+  string name = 3;               // 必填
+  string base_url = 4;           // 必填
+  string api_key = 5;            // 非必填
+  int32 timeout_seconds = 6;     // 非必填；留空(0)则由服务端默认设置为 30 秒
 }
 
 message CreateMcpToolResponse {
+  McpTool tool = 1;
+}
+
+message GetMcpToolRequest {
+  string id = 1;
+}
+
+message GetMcpToolResponse {
+  McpTool tool = 1;
+}
+
+message UpdateMcpToolRequest {
+  string id = 1;
+  string name = 2;               // 必填
+  string base_url = 3;           // 必填
+  string api_key = 4;            // 非必填；留空表示不修改现有密钥，非空则覆盖
+  int32 timeout_seconds = 5;     // 非必填；留空(0)则重置为默认 30 秒
+}
+
+message UpdateMcpToolResponse {
   McpTool tool = 1;
 }

@@ -1,9 +1,11 @@
 // Package postgres 提供 teams / agents 的 PostgreSQL 存储实现。
 //
-// team 与其主 agent 存在循环引用（team.main_agent_id -> agents.id，
-// agent.team_id -> teams.id），对应的外键在 scripts/postgres/0001_init.sql 中
-// 声明为 DEFERRABLE INITIALLY DEFERRED，因此可以在同一事务内先插入 team、
-// 再插入 agent（或反之），提交时才校验引用完整性。
+// team 与其主 agent 存在"循环引用"（team.main_agent_id -> agents.id，
+// agent.team_id -> teams.id）。scripts/postgres/001_schema.sql 只对
+// agents.team_id 声明了外键（agents 表晚于 teams 表创建，可以内联 REFERENCES），
+// teams.main_agent_id 没有对应的 DB 级外键约束——该不变量改为由本文件的
+// CreateTeam（同一事务内原子插入 team + 主 agent）与 DeleteAgent（拒绝删除
+// is_main=true 的 Agent）在应用层保证。
 package postgres
 
 import (

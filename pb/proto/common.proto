@@ -100,14 +100,18 @@ message ToolOption {
   string id = 1;
   string name = 2;
   string description = 3;
+  // 是否为某个团队自行接入的自定义 MCP 工具（true），区别于平台内置静态清单（false，默认值）。
+  // 仅 ListMcpToolOptions 会返回 true 的情形；前端据此为自定义工具渲染"编辑"入口。
+  bool is_custom = 4;
 }
 
-// McpTool 是用户自行接入的自定义 MCP 工具（区别于 internal/options.MCPTools() 提供的
+// McpTool 是某个团队自行接入的自定义 MCP 工具（区别于 internal/options.MCPTools() 提供的
 // 平台内置静态清单）：创建成功后会与内置工具合并出现在 ListMcpToolOptions 的返回结果中
-// （以 ToolOption 形式，Description 取 base_url），可供任意团队的 Agent 选择绑定，
-// 全局共享、不归属于某个团队/Agent。
+// （以 ToolOption 形式，Description 取 base_url），仅供归属团队内的 Agent 选择绑定——
+// 自定义 MCP 工具按团队隔离，不同团队互不可见，而非全局共享。
 message McpTool {
-  string id = 1;              // 唯一标识；创建时留空则由服务端生成 "mcp_tool_<序号>" 形式的 id
+  string id = 1;              // 唯一标识；创建时由服务端生成 "mcp_tool_<6位随机数字/字母>" 形式的 id
+  string team_id = 8;          // 归属团队 id；决定该工具仅对哪个团队的 Agent 可见可选
   string name = 2;             // 展示名称
   string base_url = 3;         // MCP 服务地址
   bool api_key_set = 4;        // 只读：是否已配置 API Key（不回显明文，避免密钥随查询接口泄露）

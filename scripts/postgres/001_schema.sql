@@ -1,9 +1,18 @@
 -- Agent Runtime 平台 —— PostgreSQL 初始化脚本
 --
 -- 承载强关系型的配置数据：团队（teams）与 Agent（agents）。
--- 两者存在“循环引用”：team.main_agent_id -> agents.id，agent.team_id -> teams.id，
--- 因此相关外键均声明为 DEFERRABLE INITIALLY DEFERRED，允许在同一事务内以任意顺序插入，
--- 直到事务提交时才校验，从而支持“创建团队的同时原子创建其主 Agent”。
+-- 本脚本只包含建表语句（CREATE TYPE / CREATE TABLE / CREATE INDEX），不使用
+-- ALTER TABLE：
+--   - agents.team_id / mcp_tools.team_id 直接在建表时内联 REFERENCES teams (id)，
+--     因为 teams 表总是先于它们创建，无需事后补约束。
+--   - teams.main_agent_id 不声明外键约束：team 与其主 agent 存在"循环引用"
+--     （team.main_agent_id -> agents.id，agent.team_id -> teams.id），而 agents
+--     表要晚于 teams 表创建，建表语句里无法内联引用一个还不存在的表，若要同时
+--     满足该约束只能事后用 ALTER TABLE 补一条 DEFERRABLE 外键。这里选择直接不做
+--     该约束：这一不变量（主 Agent 必定存在）已经由应用层保证——CreateTeam 在
+--     同一事务内原子创建团队及其主 Agent；DeleteAgent 显式拒绝删除 is_main=true
+--     的 Agent，只能随 DeleteTeam 一起删除（见
+--     internal/store/postgres/postgres.go）。
 --
 -- 聊天记录（ChatMessage）使用 MongoDB 存储，见 scripts/mongo/。
 -- Agent 运行态热缓存使用 Redis，无需预置 schema。
@@ -37,7 +46,7 @@ CREATE TABLE IF NOT EXISTS teams (
 
 CREATE TABLE IF NOT EXISTS agents (
     id         TEXT PRIMARY KEY,
-    team_id    TEXT NOT NULL,
+    team_id    TEXT NOT NULL REFERENCES teams (id) ON DELETE CASCADE,
     name       TEXT NOT NULL,
     prompt     TEXT NOT NULL DEFAULT '',
     model      TEXT NOT NULL DEFAULT '',
@@ -55,26 +64,17 @@ CREATE TABLE IF NOT EXISTS agents (
     a2a_config JSONB
 );
 
-ALTER TABLE agents
-    ADD CONSTRAINT fk_agents_team
-    FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE CASCADE
-    DEFERRABLE INITIALLY DEFERRED;
-
-ALTER TABLE teams
-    ADD CONSTRAINT fk_teams_main_agent
-    FOREIGN KEY (main_agent_id) REFERENCES agents (id) ON DELETE RESTRICT
-    DEFERRABLE INITIALLY DEFERRED;
-
 CREATE INDEX IF NOT EXISTS idx_agents_team_id ON agents (team_id);
 CREATE INDEX IF NOT EXISTS idx_teams_created_at ON teams (created_at);
 
--- 自定义 MCP 工具：全局共享、不归属于某个团队/Agent，与内置静态清单
--- （internal/options.MCPTools()）合并后供任意 Agent 选择绑定。
+-- 自定义 MCP 工具：按团队隔离，仅对归属团队的 Agent 可见可选（与内置静态清单
+-- internal/options.MCPTools() 合并后一起展示），不同团队互不可见。
 -- id 为空时由服务端（internal/service.AgentServer.CreateMcpTool）通过
--- internal/tools.NewMCPToolID 生成 "mcp-tool-<6位随机数字/字母>" 形式的默认值
+-- internal/tools.NewMCPToolID 生成 "mcp_tool_<6位随机数字/字母>" 形式的默认值
 -- 后再落库，本表不负责生成默认 id。
 CREATE TABLE IF NOT EXISTS mcp_tools (
     id              TEXT PRIMARY KEY,
+    team_id         TEXT NOT NULL REFERENCES teams (id) ON DELETE CASCADE,
     name            TEXT NOT NULL,
     base_url        TEXT NOT NULL,
     api_key         TEXT NOT NULL DEFAULT '',
@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
     updated_at      BIGINT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_mcp_tools_team_id ON mcp_tools (team_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_created_at ON mcp_tools (created_at);
 
 COMMIT;

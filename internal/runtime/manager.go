@@ -25,7 +25,7 @@ import (
 // 保持 runtime 包职责单一、便于测试替身）。store.Store 已实现该方法，
 // main.go 中可直接把组合好的 store.Store 传给 New。
 type mcpToolLister interface {
-	ListMcpTools(ctx context.Context) ([]*agenteamv1.McpTool, error)
+	ListMcpToolsByTeam(ctx context.Context, teamID string) ([]*agenteamv1.McpTool, error)
 }
 
 // Manager 管理所有已加载的 Agent 运行态，底层由 Redis 承载。
@@ -183,8 +183,9 @@ func fromSnapshot(s *cache.AgentSnapshot) *agenteamv1.Agent {
 // validate 按 Agent.Kind 校验配置合法性：
 //   - AGENT_KIND_PROMPT（默认，含未指定 kind 的兼容旧数据场景）：沿用原有的
 //     name/prompt/model/mcp_tools/skills 校验；mcp_tools 除平台内置静态清单
-//     （internal/options.MCPTools()）外，还接受用户自行接入的自定义 MCP 工具 id
-//     （通过 m.mcpTools 动态查询，见 store.Store.ListMcpTools）。
+//     （internal/options.MCPTools()）外，还接受该 Agent 所属团队自行接入的自定义
+//     MCP 工具 id（通过 m.mcpTools 按 agent.TeamId 动态查询，见 store.Store.
+//     ListMcpToolsByTeam；自定义工具按团队隔离，不允许绑定其他团队接入的工具）。
 //   - AGENT_KIND_A2A：只校验 name 与 endpoint_url，其余 prompt 相关字段对该
 //     方式无意义，允许为空；真正的连通性校验发生在 discoverAndFillA2A 中。
 func (m *Manager) validate(ctx context.Context, agent *agenteamv1.Agent) error {
@@ -207,7 +208,7 @@ func (m *Manager) validate(ctx context.Context, agent *agenteamv1.Agent) error {
 		return fmt.Errorf("不支持的模型: %s", agent.Model)
 	}
 	if len(agent.McpTools) > 0 {
-		custom, err := m.mcpTools.ListMcpTools(ctx)
+		custom, err := m.mcpTools.ListMcpToolsByTeam(ctx, agent.TeamId)
 		if err != nil {
 			return fmt.Errorf("查询自定义 MCP 工具失败: %w", err)
 		}

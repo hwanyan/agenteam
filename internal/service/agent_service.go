@@ -234,16 +234,28 @@ func (s *AgentServer) ListModelOptions(_ context.Context, _ *agenteamv1.ListMode
 }
 
 // ListMcpToolOptions 返回可选的 MCP 工具清单：平台内置静态清单
-// （internal/options.MCPTools()）与用户自行接入的自定义 MCP 工具（Store.ListMcpTools）
-// 合并后的结果；自定义工具的 Description 展示其 base_url，方便用户识别。
-func (s *AgentServer) ListMcpToolOptions(ctx context.Context, _ *agenteamv1.ListMcpToolOptionsRequest) (*agenteamv1.ListMcpToolOptionsResponse, error) {
+// （internal/options.MCPTools()）与指定团队自行接入的自定义 MCP 工具
+// （Store.ListMcpToolsByTeam）合并后的结果；自定义工具的 Description 展示其
+// base_url，IsCustom 标记为 true，方便前端区分展示"编辑"入口。自定义工具按团队
+// 隔离，不同团队互不可见。
+//
+// req.TeamId 允许为空：用于"新增团队"表单场景（团队尚未创建，无 team_id 可传），
+// 此时只返回平台内置静态清单，不含任何自定义工具（因为自定义工具此时也确实不可能
+// 归属于一个还不存在的团队）。
+func (s *AgentServer) ListMcpToolOptions(ctx context.Context, req *agenteamv1.ListMcpToolOptionsRequest) (*agenteamv1.ListMcpToolOptionsResponse, error) {
 	merged := append([]*agenteamv1.ToolOption{}, options.MCPTools()...)
-	custom, err := s.Store.ListMcpTools(ctx)
+	if req.TeamId == "" {
+		return &agenteamv1.ListMcpToolOptionsResponse{Tools: merged}, nil
+	}
+	if _, err := s.Store.GetTeam(ctx, req.TeamId); err != nil {
+		return nil, teamNotFoundOrErr(err)
+	}
+	custom, err := s.Store.ListMcpToolsByTeam(ctx, req.TeamId)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "查询自定义 MCP 工具失败: %v", err)
 	}
 	for _, t := range custom {
-		merged = append(merged, &agenteamv1.ToolOption{Id: t.Id, Name: t.Name, Description: t.BaseUrl})
+		merged = append(merged, &agenteamv1.ToolOption{Id: t.Id, Name: t.Name, Description: t.BaseUrl, IsCustom: true})
 	}
 	return &agenteamv1.ListMcpToolOptionsResponse{Tools: merged}, nil
 }
@@ -253,17 +265,24 @@ func (s *AgentServer) ListSkillOptions(_ context.Context, _ *agenteamv1.ListSkil
 	return &agenteamv1.ListSkillOptionsResponse{Skills: options.Skills()}, nil
 }
 
-// CreateMcpTool 接入一个新的自定义 MCP 工具；成功后会与内置工具合并出现在
-// ListMcpToolOptions 返回的可选清单中，供任意团队的 Agent 选择绑定
-// （全局共享，不归属于某个团队/Agent）。
+// CreateMcpTool 在指定团队下接入一个新的自定义 MCP 工具；成功后会与内置工具合并
+// 出现在该团队的 ListMcpToolOptions 返回的可选清单中，仅供该团队的 Agent 选择绑定
+// （按团队隔离，不同团队互不可见）。
 //
 // 字段规则：
+//   - team_id 必填，必须是已存在的团队。
 //   - id 不对外开放指定入口，始终由服务端通过 internal/tools.NewMCPToolID 生成
-//     "mcp-tool-<6位随机数字/字母>" 形式的 id（如 "mcp-tool-sc1so3"）。
+//     "mcp_tool_<6位随机数字/字母>" 形式的 id（如 "mcp_tool_sc1so3"）。
 //   - name / base_url 必填。
 //   - api_key 非必填；服务端不会在任何响应中回显明文，只反映 ApiKeySet 标记。
 //   - timeout_seconds 非必填，留空(0)则默认 30 秒。
 func (s *AgentServer) CreateMcpTool(ctx context.Context, req *agenteamv1.CreateMcpToolRequest) (*agenteamv1.CreateMcpToolResponse, error) {
+	if req.TeamId == "" {
+		return nil, status.Error(codes.InvalidArgument, "team_id 不能为空")
+	}
+	if _, err := s.Store.GetTeam(ctx, req.TeamId); err != nil {
+		return nil, teamNotFoundOrErr(err)
+	}
 	if req.Name == "" {
 		return nil, status.Error(codes.InvalidArgument, "MCP 工具名称不能为空")
 	}
@@ -278,6 +297,7 @@ func (s *AgentServer) CreateMcpTool(ctx context.Context, req *agenteamv1.CreateM
 
 	now := time.Now().Unix()
 	tool := &agenteamv1.McpTool{
+		TeamId:         req.TeamId,
 		Name:           req.Name,
 		BaseUrl:        req.BaseUrl,
 		TimeoutSeconds: timeout,
@@ -289,7 +309,7 @@ func (s *AgentServer) CreateMcpTool(ctx context.Context, req *agenteamv1.CreateM
 	// 理论上仍存在极小概率的冲突），遇到冲突（store.ErrAlreadyExists）时重新生成并重试。
 	const maxAutoIDAttempts = 10
 	for attempt := 1; ; attempt++ {
-		tool.Id = tools.NewMCPToolID("mcp-tool")
+		tool.Id = tools.NewMCPToolID("mcp_tool")
 		err := s.Store.CreateMcpTool(ctx, tool, req.ApiKey)
 		if err == nil {
 			break
@@ -303,6 +323,68 @@ func (s *AgentServer) CreateMcpTool(ctx context.Context, req *agenteamv1.CreateM
 	}
 	tool.ApiKeySet = req.ApiKey != ""
 	return &agenteamv1.CreateMcpToolResponse{Tool: tool}, nil
+}
+
+// GetMcpTool 按 id 查询单个自定义 MCP 工具的详情，供前端编辑表单回填；
+// api_key 不会在响应中回显明文，只反映 ApiKeySet 标记。
+func (s *AgentServer) GetMcpTool(ctx context.Context, req *agenteamv1.GetMcpToolRequest) (*agenteamv1.GetMcpToolResponse, error) {
+	tool, _, err := s.Store.GetMcpTool(ctx, req.Id)
+	if err != nil {
+		return nil, mcpToolNotFoundOrErr(err)
+	}
+	return &agenteamv1.GetMcpToolResponse{Tool: tool}, nil
+}
+
+// UpdateMcpTool 更新一个自定义 MCP 工具的配置信息（名称/base_url/密钥/超时时间）；
+// 工具的归属团队（team_id）创建后不可变更。api_key 为空表示"不修改现有密钥"（沿用
+// 已保存的值），非空则覆盖，避免前端每次保存都必须回传明文密钥。
+func (s *AgentServer) UpdateMcpTool(ctx context.Context, req *agenteamv1.UpdateMcpToolRequest) (*agenteamv1.UpdateMcpToolResponse, error) {
+	existing, _, err := s.Store.GetMcpTool(ctx, req.Id)
+	if err != nil {
+		return nil, mcpToolNotFoundOrErr(err)
+	}
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "MCP 工具名称不能为空")
+	}
+	if req.BaseUrl == "" {
+		return nil, status.Error(codes.InvalidArgument, "base_url 不能为空")
+	}
+
+	timeout := req.TimeoutSeconds
+	if timeout <= 0 {
+		timeout = options.DefaultMcpToolTimeoutSeconds
+	}
+
+	updated := &agenteamv1.McpTool{
+		Id:             existing.Id,
+		TeamId:         existing.TeamId,
+		Name:           req.Name,
+		BaseUrl:        req.BaseUrl,
+		TimeoutSeconds: timeout,
+		CreatedAt:      existing.CreatedAt,
+		UpdatedAt:      time.Now().Unix(),
+	}
+
+	var apiKey *string
+	if req.ApiKey != "" {
+		apiKey = &req.ApiKey
+	}
+	if err := s.Store.UpdateMcpTool(ctx, updated, apiKey); err != nil {
+		return nil, mcpToolNotFoundOrErr(err)
+	}
+	if apiKey != nil {
+		updated.ApiKeySet = *apiKey != ""
+	} else {
+		updated.ApiKeySet = existing.ApiKeySet
+	}
+	return &agenteamv1.UpdateMcpToolResponse{Tool: updated}, nil
+}
+
+func mcpToolNotFoundOrErr(err error) error {
+	if errors.Is(err, store.ErrNotFound) {
+		return status.Error(codes.NotFound, "MCP 工具不存在")
+	}
+	return status.Errorf(codes.Internal, "%v", err)
 }
 
 func agentNotFoundOrErr(err error) error {

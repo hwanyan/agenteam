@@ -5,9 +5,8 @@
 -- 开发调试用的，生产环境不应该跑这个脚本（会丢数据）。
 BEGIN;
 
-ALTER TABLE IF EXISTS teams DROP CONSTRAINT IF EXISTS fk_teams_main_agent;
-ALTER TABLE IF EXISTS agents DROP CONSTRAINT IF EXISTS fk_agents_team;
-
+-- agents.team_id / mcp_tools.team_id 的外键约束是建表时内联声明的，
+-- 随 DROP TABLE 自动一并删除，这里不需要单独 ALTER TABLE ... DROP CONSTRAINT。
 DROP TABLE IF EXISTS agents;
 DROP TABLE IF EXISTS teams;
 DROP TABLE IF EXISTS mcp_tools;
