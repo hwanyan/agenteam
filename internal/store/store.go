@@ -63,6 +63,10 @@ type Store interface {
 	// UpdateMcpTool 更新一个自定义 MCP 工具的配置；apiKey 为空指针表示"不修改现有密钥"，
 	// 非空则覆盖为新值（区分"传空字符串以清空密钥"与"未提供密钥"两种语义）。
 	UpdateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey *string) error
+	// DeleteMcpTool 删除一个自定义 MCP 工具，并在同一事务内把所属团队下所有 Agent 的
+	// agents.mcp_tools 里对它的引用一并移除（该数组只存 id、没有外键，不清理就会残留失效 id）。
+	// 返回被清理了引用的 Agent id 列表；工具不存在返回 ErrNotFound。
+	DeleteMcpTool(ctx context.Context, id string) (affectedAgentIDs []string, err error)
 
 	// AppendMessage 追加一条工作区聊天记录。
 	AppendMessage(ctx context.Context, msg *pb.ChatMessage) error
@@ -85,6 +89,7 @@ type TeamAgentStore interface {
 	ListMcpToolsByTeam(ctx context.Context, teamID string) ([]*pb.McpTool, error)
 	GetMcpTool(ctx context.Context, id string) (*pb.McpTool, string, error)
 	UpdateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey *string) error
+	DeleteMcpTool(ctx context.Context, id string) ([]string, error)
 }
 
 // MessageStore 是 Store 中“聊天记录”相关能力的子接口，由 MongoDB 实现。
@@ -168,4 +173,8 @@ func (c *composite) GetMcpTool(ctx context.Context, id string) (*pb.McpTool, str
 
 func (c *composite) UpdateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey *string) error {
 	return c.teams.UpdateMcpTool(ctx, tool, apiKey)
+}
+
+func (c *composite) DeleteMcpTool(ctx context.Context, id string) ([]string, error) {
+	return c.teams.DeleteMcpTool(ctx, id)
 }

@@ -129,9 +129,13 @@ func (s *WorkspaceServer) replyFor(ctx context.Context, agent *agenteamv1.Agent,
 		return "", status.Errorf(codes.Internal, "查询团队 Agent 列表失败: %v", err)
 	}
 
+	systemPrompt, err := s.buildSystemPrompt(ctx, agent, note)
+	if err != nil {
+		return "", err
+	}
 	result, err := s.LLM.Chat(ctx, llm.ChatRequest{
 		Model:        agent.Model,
-		SystemPrompt: composeSystemPrompt(agent, note),
+		SystemPrompt: systemPrompt,
 		History:      buildHistory(history),
 		UserMessage:  content,
 		Tools:        delegationTools,
@@ -225,9 +229,13 @@ func (s *WorkspaceServer) SendMessageStream(req *agenteamv1.SendMessageRequest, 
 		// （这也是此前"主 Agent 感知不到子 Agent"问题的根本修复：过去 system
 		// prompt 里完全没有任何子 Agent 信息，也没有任何委派/路由的执行链路，
 		// 纯靠 prompt 文字要求模型"优先使用某 Agent"是不可能生效的）。
+		systemPrompt, err := s.buildSystemPrompt(ctx, agent, note)
+		if err != nil {
+			return err
+		}
 		decision, err := s.LLM.Chat(ctx, llm.ChatRequest{
 			Model:        agent.Model,
-			SystemPrompt: composeSystemPrompt(agent, note),
+			SystemPrompt: systemPrompt,
 			History:      history,
 			UserMessage:  content,
 			Tools:        delegationTools,
@@ -260,9 +268,13 @@ func (s *WorkspaceServer) SendMessageStream(req *agenteamv1.SendMessageRequest, 
 // 哪个 Agent"），为空时行为与原有直接问答流程完全一致。
 func (s *WorkspaceServer) streamPromptAgentReply(ctx context.Context, stream agenteamv1.WorkspaceService_SendMessageStreamServer,
 	teamID string, agent *agenteamv1.Agent, content string, history []llm.Message, prefix string) error {
+	systemPrompt, err := s.buildSystemPrompt(ctx, agent, "")
+	if err != nil {
+		return err
+	}
 	chunks, err := s.LLM.ChatStream(ctx, llm.ChatRequest{
 		Model:        agent.Model,
-		SystemPrompt: composeSystemPrompt(agent, ""),
+		SystemPrompt: systemPrompt,
 		History:      history,
 		UserMessage:  content,
 	})
@@ -454,23 +466,80 @@ func buildHistory(all []*agenteamv1.ChatMessage) []llm.Message {
 	return out
 }
 
-// composeSystemPrompt 将 Agent 的 Prompt 与其绑定的 MCP 工具 / Skill 组合成完整的 system prompt；
+// resolveMcpToolOptions 把 agent.McpTools 里记录的工具 id 解析成"当前确实存在"的工具信息：
+// 内置静态清单（internal/options.MCPTools()）加上该 Agent 所属团队自行接入的自定义工具
+// （按 agent.TeamId 查 mcp_tools 表），按 Agent 配置里的顺序返回。
+//
+// agents.mcp_tools 只存 id、和 mcp_tools 表没有外键联动，所以其中可能残留已被删除的工具 id；
+// 这里按"表里真实存在"过滤，查不到的 id 直接丢弃，不会进入 prompt。
+// 返回的 ToolOption 只带名称（自定义工具不带 base_url，避免把内部接入地址暴露给模型进而泄露给用户）。
+func (s *WorkspaceServer) resolveMcpToolOptions(ctx context.Context, agent *agenteamv1.Agent) ([]*agenteamv1.ToolOption, error) {
+	if len(agent.McpTools) == 0 {
+		return nil, nil
+	}
+	available := make(map[string]*agenteamv1.ToolOption)
+	for _, o := range options.MCPTools() {
+		available[o.Id] = o
+	}
+	custom, err := s.Store.ListMcpToolsByTeam(ctx, agent.TeamId)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range custom {
+		available[t.Id] = &agenteamv1.ToolOption{Id: t.Id, Name: t.Name, IsCustom: true}
+	}
+	return pickOptions(agent.McpTools, available), nil
+}
+
+// buildSystemPrompt 解析 Agent 绑定的 MCP 工具后组装完整的 system prompt。
+func (s *WorkspaceServer) buildSystemPrompt(ctx context.Context, agent *agenteamv1.Agent, extra string) (string, error) {
+	mcpTools, err := s.resolveMcpToolOptions(ctx, agent)
+	if err != nil {
+		return "", status.Errorf(codes.Internal, "查询 MCP 工具失败: %v", err)
+	}
+	return composeSystemPrompt(agent, mcpTools, extra), nil
+}
+
+// pickOptions 按 ids 的顺序从 available 里取出对应选项，查不到的 id 直接跳过。
+func pickOptions(ids []string, available map[string]*agenteamv1.ToolOption) []*agenteamv1.ToolOption {
+	out := make([]*agenteamv1.ToolOption, 0, len(ids))
+	for _, id := range ids {
+		if opt, ok := available[id]; ok {
+			out = append(out, opt)
+		}
+	}
+	return out
+}
+
+// composeSystemPrompt 将 Agent 的 Prompt 与其绑定的 MCP 工具 / Skill 组合成完整的 system prompt。
+// mcpTools 必须是已经过 resolveMcpToolOptions 解析、确认真实存在的工具；
 // extra 为需要追加在末尾的额外说明（目前用于 resolveDelegationTools 生成的"团队内可协作
-// Agent 清单 + 委派说明"，为空字符串时不追加，行为与原有逻辑一致）。
+// Agent 清单 + 委派说明"，为空字符串时不追加）。
+//
+// 工具/技能只以名称（和描述）呈现，不暴露内部 id，并明确要求模型向用户介绍时使用名称。
 //
 // 注意：当前平台尚未接入真实的 MCP 工具调用协议，这里仅将工具/技能的名称与描述
 // 作为上下文告知模型“有哪些能力可用”，便于后续演进为真正的 function calling / MCP 调用。
-func composeSystemPrompt(agent *agenteamv1.Agent, extra string) string {
+func composeSystemPrompt(agent *agenteamv1.Agent, mcpTools []*agenteamv1.ToolOption, extra string) string {
 	var b strings.Builder
 	b.WriteString(agent.Prompt)
 
-	if len(agent.McpTools) > 0 {
-		b.WriteString("\n\n你可以在需要时说明会使用以下工具（当前平台工具调用能力建设中，尚未真正接入执行）：\n")
-		writeToolList(&b, agent.McpTools, options.MCPTools())
+	skills := make(map[string]*agenteamv1.ToolOption)
+	for _, o := range options.Skills() {
+		skills[o.Id] = o
 	}
-	if len(agent.Skills) > 0 {
+	agentSkills := pickOptions(agent.Skills, skills)
+
+	if len(mcpTools) > 0 {
+		b.WriteString("\n\n你可以在需要时说明会使用以下工具（当前平台工具调用能力建设中，尚未真正接入执行）：\n")
+		writeToolList(&b, mcpTools)
+	}
+	if len(agentSkills) > 0 {
 		b.WriteString("\n\n你具备以下技能：\n")
-		writeToolList(&b, agent.Skills, options.Skills())
+		writeToolList(&b, agentSkills)
+	}
+	if len(mcpTools) > 0 || len(agentSkills) > 0 {
+		b.WriteString("\n向用户介绍上述工具或技能时，请使用它们的名称，不要提及或展示任何内部 ID。")
 	}
 	if extra != "" {
 		b.WriteString(extra)
@@ -478,16 +547,13 @@ func composeSystemPrompt(agent *agenteamv1.Agent, extra string) string {
 	return b.String()
 }
 
-func writeToolList(b *strings.Builder, ids []string, all []*agenteamv1.ToolOption) {
-	byID := make(map[string]*agenteamv1.ToolOption, len(all))
-	for _, o := range all {
-		byID[o.Id] = o
-	}
-	for _, id := range ids {
-		if opt, ok := byID[id]; ok {
+// writeToolList 按"- 名称：描述"逐行写出工具/技能清单；描述为空时只写名称。不输出 id。
+func writeToolList(b *strings.Builder, opts []*agenteamv1.ToolOption) {
+	for _, opt := range opts {
+		if opt.Description != "" {
 			fmt.Fprintf(b, "- %s：%s\n", opt.Name, opt.Description)
 		} else {
-			fmt.Fprintf(b, "- %s\n", id)
+			fmt.Fprintf(b, "- %s\n", opt.Name)
 		}
 	}
 }

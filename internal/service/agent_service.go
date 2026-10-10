@@ -390,6 +390,26 @@ func (s *AgentServer) UpdateMcpTool(ctx context.Context, req *agenteamv1.UpdateM
 	return &agenteamv1.UpdateMcpToolResponse{Tool: updated}, nil
 }
 
+// DeleteMcpTool 删除一个自定义 MCP 工具，并同步清理所属团队下所有 Agent 对它的绑定引用
+// （存储层同一事务内完成），随后刷新这些 Agent 的运行态缓存快照。
+// 清理引用是必须的：agents.mcp_tools 只存 id、没有外键，否则 Agent 配置里会残留已不存在的
+// 工具 id，并继续出现在对话的 system prompt 里。
+func (s *AgentServer) DeleteMcpTool(ctx context.Context, req *agenteamv1.DeleteMcpToolRequest) (*agenteamv1.DeleteMcpToolResponse, error) {
+	affected, err := s.Store.DeleteMcpTool(ctx, req.Id)
+	if err != nil {
+		return nil, mcpToolNotFoundOrErr(err)
+	}
+	// 数据库已是最新状态；缓存刷新属于尽力而为，失败不应让已成功的删除操作整体报错。
+	for _, agentID := range affected {
+		agent, err := s.Store.GetAgent(ctx, agentID)
+		if err != nil {
+			continue
+		}
+		_ = s.Runtime.Refresh(ctx, agent)
+	}
+	return &agenteamv1.DeleteMcpToolResponse{AffectedAgents: int32(len(affected))}, nil
+}
+
 func mcpToolNotFoundOrErr(err error) error {
 	if errors.Is(err, store.ErrNotFound) {
 		return status.Error(codes.NotFound, "MCP 工具不存在")

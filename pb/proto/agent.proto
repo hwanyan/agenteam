@@ -102,6 +102,14 @@ service AgentService {
       body: "*"
     };
   }
+
+  // 删除一个自定义 MCP 工具，并在同一事务内把所属团队下所有 Agent 对它的绑定引用
+  // （agents.mcp_tools 中记录的 id）一并清理，避免 Agent 配置里残留已不存在的工具 id。
+  rpc DeleteMcpTool(DeleteMcpToolRequest) returns (DeleteMcpToolResponse) {
+    option (google.api.http) = {
+      delete: "/v1/mcp-tools/{id}"
+    };
+  }
 }
 
 message GetAgentRequest {
@@ -191,15 +199,11 @@ message ListSkillOptionsResponse {
 }
 
 message CreateMcpToolRequest {
-  // id 不对外开放指定入口，始终由服务端通过 internal/tools.NewMCPToolID 生成
-  // "mcp_tool_<6位随机数字/字母>" 形式的 id，因此保留字段号 1 不再使用。
-  reserved 1;
-  reserved "id";
-  string team_id = 2;            // 必填；决定该工具归属哪个团队，仅对该团队可见可选
-  string name = 3;               // 必填
-  string base_url = 4;           // 必填
-  string api_key = 5;            // 非必填
-  int32 timeout_seconds = 6;     // 非必填；留空(0)则由服务端默认设置为 30 秒
+  string team_id = 1;            // 必填；决定该工具归属哪个团队，仅对该团队可见可选
+  string name = 2;               // 必填
+  string base_url = 3;           // 必填
+  string api_key = 4;            // 非必填
+  int32 timeout_seconds = 5;     // 非必填；留空(0)则由服务端默认设置为 30 秒
 }
 
 message CreateMcpToolResponse {
@@ -224,4 +228,13 @@ message UpdateMcpToolRequest {
 
 message UpdateMcpToolResponse {
   McpTool tool = 1;
+}
+
+message DeleteMcpToolRequest {
+  string id = 1;
+}
+
+message DeleteMcpToolResponse {
+  // 被同步清理了该工具绑定引用的 Agent 数量（供前端提示用户）。
+  int32 affected_agents = 1;
 }

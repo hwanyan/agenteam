@@ -112,6 +112,16 @@ func (m *Manager) Get(ctx context.Context, agentID string) (*agenteamv1.Agent, b
 	return fromSnapshot(snapshot), true, nil
 }
 
+// Refresh 把一个已持久化的 Agent 当前配置同步写入运行态缓存，不做校验、不改动版本号。
+// 用于配置已经在存储层被直接修改（如删除 MCP 工具时清理了 Agent 的绑定引用）、
+// 只需让缓存快照跟上的场景。
+func (m *Manager) Refresh(ctx context.Context, agent *agenteamv1.Agent) error {
+	if err := m.cache.Set(ctx, toSnapshot(agent)); err != nil {
+		return fmt.Errorf("runtime: 刷新运行态缓存失败: %w", err)
+	}
+	return nil
+}
+
 // Unload 从运行态缓存中移除指定 Agent（如 Agent/团队被删除时调用）。
 func (m *Manager) Unload(ctx context.Context, agentID string) error {
 	return m.cache.Delete(ctx, agentID)

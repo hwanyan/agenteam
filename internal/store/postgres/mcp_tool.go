@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -128,6 +129,58 @@ func (s *Store) UpdateMcpTool(ctx context.Context, tool *agenteamv1.McpTool, api
 		return store.ErrNotFound
 	}
 	return nil
+}
+
+// DeleteMcpTool 在同一事务内删除一个自定义 MCP 工具，并把所属团队下所有 Agent 的
+// agents.mcp_tools 里对它的引用移除。
+//
+// agents.mcp_tools 是 TEXT[]，只存工具 id，和 mcp_tools 表之间没有外键，数据库不会
+// 自动联动；不在这里同步清理的话，Agent 配置里就会残留已不存在的工具 id。
+// 受影响的 Agent 同时 version+1、刷新 updated_at（等价于一次配置重载）。
+// 返回被清理了引用的 Agent id 列表；工具不存在返回 store.ErrNotFound。
+func (s *Store) DeleteMcpTool(ctx context.Context, id string) ([]string, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // 已 Commit 时 Rollback 为 no-op
+
+	var teamID string
+	if err := tx.QueryRow(ctx, `DELETE FROM mcp_tools WHERE id = $1 RETURNING team_id`, id).Scan(&teamID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, store.ErrNotFound
+		}
+		return nil, fmt.Errorf("postgres: delete mcp tool: %w", err)
+	}
+
+	// 仅清理同团队 Agent：自定义工具按团队隔离，其他团队的 Agent 不可能绑定过它。
+	rows, err := tx.Query(ctx, `
+		UPDATE agents
+		SET mcp_tools = array_remove(mcp_tools, $1::text), version = version + 1, updated_at = $3
+		WHERE team_id = $2 AND $1::text = ANY(mcp_tools)
+		RETURNING id
+	`, id, teamID, time.Now().Unix())
+	if err != nil {
+		return nil, fmt.Errorf("postgres: clean agent mcp_tools refs: %w", err)
+	}
+	affected := make([]string, 0)
+	for rows.Next() {
+		var agentID string
+		if err := rows.Scan(&agentID); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("postgres: scan affected agent id: %w", err)
+		}
+		affected = append(affected, agentID)
+	}
+	rows.Close() // 必须在 Commit 前读完并关闭，否则同一连接上的后续操作会失败
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: iterate affected agents: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("postgres: commit delete mcp tool: %w", err)
+	}
+	return affected, nil
 }
 
 // uniqueViolationConstraint 判断错误是否为 PostgreSQL 唯一约束冲突，并返回触发冲突的
