@@ -77,6 +77,16 @@ message Team {
   int64 updated_at = 5;
 }
 
+// 一次工具调用的展示信息，用于在工作区回复下方展示"这条回复过程中调用了哪个工具"。
+message ToolCallInfo {
+  string id = 1;         // 同一条回复内唯一；流式过程中据此把 running 更新为 done / error
+  string name = 2;       // 展示名称（面向用户，不是内部 id）
+  string kind = 3;       // "agent"：团队主 Agent 把请求委派给了某个子 Agent；
+                         // "tool"：Agent（如接入的 A2A Agent）在处理过程中调用的工具
+  string arguments = 4;  // 入参（JSON 字符串，过长会被截断）；可为空
+  string status = 5;     // "running" | "done" | "error"
+}
+
 // 工作区中的一条聊天消息
 message ChatMessage {
   string id = 1;
@@ -85,6 +95,10 @@ message ChatMessage {
   MessageRole role = 4;
   string content = 5;
   int64 created_at = 6;
+  // 模型的思考过程（如 DeepSeek Reasoner 返回的 reasoning_content）；模型不提供时为空。
+  string reasoning = 7;
+  // 生成这条回复的过程中发生的工具调用，按发生顺序排列。
+  repeated ToolCallInfo tool_calls = 8;
 }
 
 // 可选的 LLM 模型

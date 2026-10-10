@@ -270,7 +270,55 @@ func joinTextParts(parts []messagePart) string {
 // 该 channel，消费方应终止读取并按错误处理。
 type StreamChunk struct {
 	Delta string
-	Err   error
+	// Tool 非空表示这是一个"工具调用过程事件"（对端 Agent 在处理消息时调用了某个工具），
+	// 与 Delta 互斥；不影响回复正文。
+	Tool *ToolEvent
+	Err  error
+}
+
+// 工具调用过程事件的阶段取值。
+const (
+	ToolPhaseStart   = "start"   // 开始调用
+	ToolPhaseSuccess = "success" // 调用成功
+	ToolPhaseError   = "error"   // 调用失败（非致命，对端 Agent 仍会继续处理）
+)
+
+// ToolEvent 是对端 Agent 在处理消息过程中产生的一次工具调用过程事件。
+//
+// 对端通过 A2A 状态更新事件的 metadata 扩展字段透出（键名 toolEventMetaKey）；
+// 对端不支持该扩展时不会产生此事件，对正文流式不产生任何影响。
+type ToolEvent struct {
+	Phase     string // ToolPhaseStart / ToolPhaseSuccess / ToolPhaseError
+	Name      string // 工具名称
+	Arguments string // 入参（JSON 字符串），仅 start 阶段携带
+}
+
+// toolEventMetaKey 是工具调用过程事件在 A2A 事件 metadata 中使用的扩展键，
+// 取值为 {"phase": ..., "name": ..., "arguments": ...}。
+const toolEventMetaKey = "toolEvent"
+
+type toolEventPayload struct {
+	Phase     string `json:"phase"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// extractToolEvent 从事件 metadata 中解析工具调用过程事件；没有该扩展、
+// 或内容不合法（缺少阶段/名称）时返回 nil。
+func extractToolEvent(metadata map[string]json.RawMessage) *ToolEvent {
+	raw, ok := metadata[toolEventMetaKey]
+	if !ok {
+		return nil
+	}
+	var p toolEventPayload
+	if err := json.Unmarshal(raw, &p); err != nil || p.Name == "" {
+		return nil
+	}
+	switch p.Phase {
+	case ToolPhaseStart, ToolPhaseSuccess, ToolPhaseError:
+		return &ToolEvent{Phase: p.Phase, Name: p.Name, Arguments: p.Arguments}
+	}
+	return nil
 }
 
 // streamEvent 是 SSE 流中一次 JSON-RPC 响应携带的 result（即 A2A 规范的 StreamResponse），
@@ -299,6 +347,20 @@ type streamEvent struct {
 	Status   *taskStatus `json:"status"`
 	Artifact *artifact   `json:"artifact"`
 	Final    bool        `json:"final"` // 扁平风格标记该事件是否为流的最后一个事件（1.0 规范已移除，靠 status.state 终态判断）
+
+	// 事件级 metadata 扩展字段（扁平风格在本层；嵌套风格在 statusUpdate.metadata 里）。
+	Metadata map[string]json.RawMessage `json:"metadata"`
+}
+
+// toolEvent 返回该事件携带的工具调用过程事件（若有），兼容扁平与嵌套两种序列化风格。
+func (e *streamEvent) toolEvent() *ToolEvent {
+	if t := extractToolEvent(e.Metadata); t != nil {
+		return t
+	}
+	if e.StatusUpdate != nil {
+		return extractToolEvent(e.StatusUpdate.Metadata)
+	}
+	return nil
 }
 
 type taskSnapshot struct {
@@ -306,8 +368,9 @@ type taskSnapshot struct {
 }
 
 type taskStatusUpdateEvent struct {
-	Status *taskStatus `json:"status"`
-	Final  bool        `json:"final"`
+	Status   *taskStatus                `json:"status"`
+	Final    bool                       `json:"final"`
+	Metadata map[string]json.RawMessage `json:"metadata"`
 }
 
 type taskArtifactUpdateEvent struct {
@@ -481,6 +544,13 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- StreamChunk) error 
 			return false, fmt.Errorf("a2a: 解析 message/stream result 失败: %w", err)
 		}
 
+		if tool := event.toolEvent(); tool != nil {
+			select {
+			case out <- StreamChunk{Tool: tool}:
+			case <-ctx.Done():
+				return true, ctx.Err()
+			}
+		}
 		if text := event.extractText(); text != "" {
 			select {
 			case out <- StreamChunk{Delta: text}:

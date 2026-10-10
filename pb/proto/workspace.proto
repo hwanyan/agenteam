@@ -47,11 +47,18 @@ message SendMessageResponse {
 // - 流的第一条消息携带已持久化的 user_message（不携带 delta）；
 // - 中间的每条消息携带一段增量文本 delta（对应模型输出的一个 token/片段）；
 // - 流的最后一条消息 done=true，并携带已持久化的完整 agent_message。
+//
+// 除正文 delta 外，还可能穿插：
+// - reasoning_delta：模型思考过程的增量文本（模型不提供思考内容时不会出现）；
+// - tool_call：一次工具调用的状态。同一个 id 会先以 status=running 出现，
+//   结束后再以 status=done / error 出现一次，前端按 id 合并即可。
 message SendMessageStreamResponse {
   string delta = 1;
   bool done = 2;
   ChatMessage user_message = 3;
   ChatMessage agent_message = 4;
+  string reasoning_delta = 5;
+  ToolCallInfo tool_call = 6;
 }
 
 message ListMessagesRequest {

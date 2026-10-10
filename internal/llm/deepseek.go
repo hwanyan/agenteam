@@ -65,7 +65,7 @@ func (c *DeepSeekClient) Chat(ctx context.Context, req ChatRequest) (ChatResult,
 		return ChatResult{}, fmt.Errorf("llm: empty choices in response")
 	}
 	msg := resp.Choices[0].Message
-	return ChatResult{Content: msg.Content, ToolCalls: mapToolCalls(msg.ToolCalls)}, nil
+	return ChatResult{Content: msg.Content, Reasoning: msg.ReasoningContent, ToolCalls: mapToolCalls(msg.ToolCalls)}, nil
 }
 
 // buildTools 将平台内 provider 无关的 Tool 定义转换为 DeepSeek SDK 所需的
@@ -138,13 +138,21 @@ func (c *DeepSeekClient) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 				return
 			}
 			for _, choice := range resp.Choices {
-				if choice.Delta.Content == "" {
-					continue
+				// 思考过程（reasoning_content）与正文（content）分开转发：Reasoner 模型会先流出
+				// 一段思考内容，再流出正文；Chat 模型没有思考内容，此处自然为空。
+				if choice.Delta.ReasoningContent != "" {
+					select {
+					case out <- StreamChunk{Reasoning: choice.Delta.ReasoningContent}:
+					case <-ctx.Done():
+						return
+					}
 				}
-				select {
-				case out <- StreamChunk{Delta: choice.Delta.Content}:
-				case <-ctx.Done():
-					return
+				if choice.Delta.Content != "" {
+					select {
+					case out <- StreamChunk{Delta: choice.Delta.Content}:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}

@@ -211,63 +211,111 @@ func (s *WorkspaceServer) SendMessageStream(req *agenteamv1.SendMessageRequest, 
 	}
 	history := buildHistory(existing)
 
+	// 回复的生成过程（正文 / 思考过程 / 工具调用）统一写入 rec：一边实时转发给客户端，
+	// 一边记录下来，结束后随这条回复一起落库。
+	rec := newStreamRecorder(stream)
+	replyAgentID, genErr := s.generateStreamReply(ctx, rec, agent, content, history)
+	if genErr != nil {
+		rec.settleTools(toolStatusError)
+		// 若已经流出部分正文后才失败，尽量把已生成的内容连同错误说明一起落库，避免用户看到的内容
+		// 与历史记录不一致；一个字都还没流出时不落库，直接把错误返回给调用方。
+		if rec.hasContent() {
+			s.persistAgentReply(ctx, team.Id, replyAgentID, rec.contentText()+status.Convert(genErr).Message(), rec)
+		}
+		return genErr
+	}
+	rec.settleTools(toolStatusDone)
+
+	agentMsg, err := s.persistAgentReply(ctx, team.Id, replyAgentID, rec.contentText(), rec)
+	if err != nil {
+		return status.Errorf(codes.Internal, "保存回复失败: %v", err)
+	}
+	return stream.Send(&agenteamv1.SendMessageStreamResponse{Done: true, AgentMessage: agentMsg})
+}
+
+// generateStreamReply 生成本次对话的回复，并把正文 / 思考过程 / 工具调用流式写入 rec。
+// 返回实际生成回复的 Agent id（发生委派时是被委派的子 Agent，否则是团队主 Agent）。
+// 本方法只负责"生成"，落库与发送 done 由调用方 SendMessageStream 统一收尾。
+func (s *WorkspaceServer) generateStreamReply(ctx context.Context, rec *streamRecorder, agent *agenteamv1.Agent,
+	content string, history []llm.Message) (string, error) {
 	// 当团队的主 Agent 是「外部 A2A Agent」时，直接把回复生成"外包"给 streamA2AReply，
-	// 用 A2A 协议对接，并 return 提前结束整个函数——不再走下方本地 LLM 的那一整套流程。
+	// 用 A2A 协议对接，不再走下方本地 LLM 的那一整套流程。
 	// 因此，如果主 Agent 是 A2A Agent，这个团队内就不可能存在其他子 Agent。
 	if agent.Kind == agenteamv1.AgentKind_AGENT_KIND_A2A {
-		return s.streamA2AReply(ctx, stream, team.Id, agent, content, "")
+		return agent.Id, s.streamA2AReply(ctx, rec, agent, content)
 	}
 
 	delegationTools, note, siblings, err := s.resolveDelegationTools(ctx, agent)
 	if err != nil {
-		return status.Errorf(codes.Internal, "查询团队 Agent 列表失败: %v", err)
+		return agent.Id, status.Errorf(codes.Internal, "查询团队 Agent 列表失败: %v", err)
 	}
-	if len(delegationTools) > 0 {
-		// 团队内还存在其他可协作的 Agent：先做一次非流式的"路由决策"调用，
-		// 让主 Agent 判断本次请求是否应转交给某个更专业的子 Agent；若决定委派，
-		// 则实时流式转发该子 Agent 的真实回答，而不是让主 Agent 自己勉强作答
-		// （这也是此前"主 Agent 感知不到子 Agent"问题的根本修复：过去 system
-		// prompt 里完全没有任何子 Agent 信息，也没有任何委派/路由的执行链路，
-		// 纯靠 prompt 文字要求模型"优先使用某 Agent"是不可能生效的）。
-		systemPrompt, err := s.buildSystemPrompt(ctx, agent, note)
-		if err != nil {
-			return err
-		}
-		decision, err := s.LLM.Chat(ctx, llm.ChatRequest{
-			Model:        agent.Model,
-			SystemPrompt: systemPrompt,
-			History:      history,
-			UserMessage:  content,
-			Tools:        delegationTools,
-		})
-		if err != nil {
-			return status.Errorf(codes.Unavailable, "调用模型失败: %v", err)
-		}
-		if target, delegatedMsg, ok := parseDelegation(decision.ToolCalls, siblings); ok {
-			if delegatedMsg == "" {
-				delegatedMsg = content
-			}
-			prefix := delegationPrefix(target)
-			if target.Kind == agenteamv1.AgentKind_AGENT_KIND_A2A {
-				return s.streamA2AReply(ctx, stream, team.Id, target, delegatedMsg, prefix)
-			}
-			return s.streamPromptAgentReply(ctx, stream, team.Id, target, delegatedMsg, history, prefix)
-		}
+	if len(delegationTools) == 0 {
+		return agent.Id, s.streamPromptAgentReply(ctx, rec, agent, content, history)
+	}
+
+	// 团队内还存在其他可协作的 Agent：先做一次非流式的"路由决策"调用，
+	// 让主 Agent 判断本次请求是否应转交给某个更专业的子 Agent；若决定委派，
+	// 则实时流式转发该子 Agent 的真实回答，而不是让主 Agent 自己勉强作答
+	// （这也是此前"主 Agent 感知不到子 Agent"问题的根本修复：过去 system
+	// prompt 里完全没有任何子 Agent 信息，也没有任何委派/路由的执行链路，
+	// 纯靠 prompt 文字要求模型"优先使用某 Agent"是不可能生效的）。
+	systemPrompt, err := s.buildSystemPrompt(ctx, agent, note)
+	if err != nil {
+		return agent.Id, err
+	}
+	decision, err := s.LLM.Chat(ctx, llm.ChatRequest{
+		Model:        agent.Model,
+		SystemPrompt: systemPrompt,
+		History:      history,
+		UserMessage:  content,
+		Tools:        delegationTools,
+	})
+	if err != nil {
+		return agent.Id, status.Errorf(codes.Unavailable, "调用模型失败: %v", err)
+	}
+	// 路由决策这次调用本身若带有思考过程（如 Reasoner 模型），先展示出来。
+	if err := typewrite(ctx, decision.Reasoning, reasoningChunkSize, reasoningChunkInterval, rec.sendReasoning); err != nil {
+		return agent.Id, err
+	}
+
+	target, delegatedMsg, ok := parseDelegation(decision.ToolCalls, siblings)
+	if !ok {
 		// 未触发委派：路由决策调用中已经生成了完整的最终回复内容，这里按固定大小切片
 		// 模拟打字机效果推送，避免为保留流式视觉效果而对同一问题重复调用一次模型
 		// （重复调用不仅浪费成本，还可能生成与本次决策不一致的另一份回复）。
-		return s.streamPlainText(ctx, stream, team.Id, agent.Id, decision.Content)
+		return agent.Id, typewrite(ctx, decision.Content, plainStreamChunkSize, plainStreamChunkInterval, rec.sendDelta)
 	}
 
-	return s.streamPromptAgentReply(ctx, stream, team.Id, agent, content, history, "")
+	if delegatedMsg == "" {
+		delegatedMsg = content
+	}
+	// 委派本身记为一次"工具调用"，让用户在回复下方看到这次请求被转交给了哪个子 Agent。
+	callID, err := rec.startTool(delegationToolLabel(target), toolKindAgent, delegationArgsJSON(delegatedMsg))
+	if err != nil {
+		return target.Id, err
+	}
+	if err := rec.sendDelta(delegationPrefix(target)); err != nil {
+		return target.Id, err
+	}
+
+	var runErr error
+	if target.Kind == agenteamv1.AgentKind_AGENT_KIND_A2A {
+		runErr = s.streamA2AReply(ctx, rec, target, delegatedMsg)
+	} else {
+		runErr = s.streamPromptAgentReply(ctx, rec, target, delegatedMsg, history)
+	}
+	if runErr != nil {
+		_ = rec.finishTool(callID, toolStatusError)
+		return target.Id, runErr
+	}
+	return target.Id, rec.finishTool(callID, toolStatusDone)
 }
 
-// streamPromptAgentReply 通过 llm.Client.ChatStream 实时流式获取并转发某个本地
-// Prompt 驱动 Agent（可能是团队主 Agent 本身，也可能是委派命中的子 Agent）的回复。
-// prefix 非空时会作为回复的第一段文本一并流出并持久化（用于向用户提示"这段回答来自
-// 哪个 Agent"），为空时行为与原有直接问答流程完全一致。
-func (s *WorkspaceServer) streamPromptAgentReply(ctx context.Context, stream agenteamv1.WorkspaceService_SendMessageStreamServer,
-	teamID string, agent *agenteamv1.Agent, content string, history []llm.Message, prefix string) error {
+// streamPromptAgentReply 通过 llm.Client.ChatStream 实时获取某个本地 Prompt 驱动 Agent
+// （可能是团队主 Agent 本身，也可能是委派命中的子 Agent）的回复，把正文与思考过程
+// 流式写入 rec。只负责"生成"，落库与发送 done 由 SendMessageStream 统一收尾。
+func (s *WorkspaceServer) streamPromptAgentReply(ctx context.Context, rec *streamRecorder, agent *agenteamv1.Agent,
+	content string, history []llm.Message) error {
 	systemPrompt, err := s.buildSystemPrompt(ctx, agent, "")
 	if err != nil {
 		return err
@@ -282,65 +330,35 @@ func (s *WorkspaceServer) streamPromptAgentReply(ctx context.Context, stream age
 		return status.Errorf(codes.Unavailable, "调用模型失败: %v", err)
 	}
 
-	var full strings.Builder
-	if prefix != "" {
-		full.WriteString(prefix)
-		if err := stream.Send(&agenteamv1.SendMessageStreamResponse{Delta: prefix}); err != nil {
-			return err
-		}
-	}
 	for chunk := range chunks {
 		if chunk.Err != nil {
-			// 已生成的部分内容仍落库，保留与前端展示一致的历史记录。
-			if full.Len() > 0 {
-				s.persistAgentReply(ctx, teamID, agent.Id, full.String()+chunk.Err.Error())
-			}
 			return status.Errorf(codes.Unavailable, "调用模型失败: %v", chunk.Err)
 		}
-		if chunk.Delta == "" {
-			continue
+		// 一个 chunk 只会携带思考过程或正文之一，空文本会被 recorder 忽略。
+		if err := rec.sendReasoning(chunk.Reasoning); err != nil {
+			return err
 		}
-		full.WriteString(chunk.Delta)
-		if err := stream.Send(&agenteamv1.SendMessageStreamResponse{Delta: chunk.Delta}); err != nil {
+		if err := rec.sendDelta(chunk.Delta); err != nil {
 			return err
 		}
 	}
-
-	agentMsg, err := s.persistAgentReply(ctx, teamID, agent.Id, full.String())
-	if err != nil {
-		return status.Errorf(codes.Internal, "保存回复失败: %v", err)
-	}
-	return stream.Send(&agenteamv1.SendMessageStreamResponse{Done: true, AgentMessage: agentMsg})
+	return nil
 }
 
-// plainStreamChunkSize 是 streamPlainText 模拟打字机效果时，每个 chunk 携带的字符数。
-const plainStreamChunkSize = 6
+// 模拟打字机效果时每个 chunk 携带的字符数与推送间隔：
+// 正文（plain*）用于"路由决策调用已拿到完整回复"的场景；思考过程（reasoning*）同理，
+// 间隔更短，因为思考内容通常更长。
+const (
+	plainStreamChunkSize     = 6
+	plainStreamChunkInterval = 20 * time.Millisecond
 
-// streamPlainText 把已经拿到的完整文本按固定大小切片、间隔推送，模拟流式打字机效果，
-// 用于"内容已经通过一次非流式调用生成完毕，只需要以流式 UI 呈现"的场景。
-func (s *WorkspaceServer) streamPlainText(ctx context.Context, stream agenteamv1.WorkspaceService_SendMessageStreamServer,
-	teamID, agentID, text string) error {
-	runes := []rune(text)
-	for i := 0; i < len(runes); i += plainStreamChunkSize {
-		end := min(i+plainStreamChunkSize, len(runes))
-		if err := stream.Send(&agenteamv1.SendMessageStreamResponse{Delta: string(runes[i:end])}); err != nil {
-			return err
-		}
-		select {
-		case <-time.After(20 * time.Millisecond):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	agentMsg, err := s.persistAgentReply(ctx, teamID, agentID, text)
-	if err != nil {
-		return status.Errorf(codes.Internal, "保存回复失败: %v", err)
-	}
-	return stream.Send(&agenteamv1.SendMessageStreamResponse{Done: true, AgentMessage: agentMsg})
-}
+	reasoningChunkSize     = 12
+	reasoningChunkInterval = 10 * time.Millisecond
+)
 
-// persistAgentReply 将 Agent 的完整回复持久化为一条聊天消息。
-func (s *WorkspaceServer) persistAgentReply(ctx context.Context, teamID, agentID, content string) (
+// persistAgentReply 将 Agent 的完整回复连同流式过程中的思考过程、工具调用，
+// 持久化为一条聊天消息。
+func (s *WorkspaceServer) persistAgentReply(ctx context.Context, teamID, agentID, content string, rec *streamRecorder) (
 	*agenteamv1.ChatMessage, error) {
 	agentMsg := &agenteamv1.ChatMessage{
 		Id:        tools.New("msg"),
@@ -349,6 +367,8 @@ func (s *WorkspaceServer) persistAgentReply(ctx context.Context, teamID, agentID
 		Role:      agenteamv1.MessageRole_MESSAGE_ROLE_AGENT,
 		Content:   content,
 		CreatedAt: time.Now().Unix(),
+		Reasoning: rec.reasoningText(),
+		ToolCalls: rec.toolCallsSnapshot(),
 	}
 	if err := s.Store.AppendMessage(ctx, agentMsg); err != nil {
 		return nil, err
@@ -364,11 +384,10 @@ func (s *WorkspaceServer) persistAgentReply(ctx context.Context, teamID, agentID
 //     一次性获取完整回复后作为单个 delta 推送，前端仍走同一套流式 UI，只是没有
 //     逐字打字机效果。
 //
-// prefix 非空时会作为回复的第一段文本一并流出并持久化（用于"主 Agent 将请求委派给
-// 某个 A2A 子 Agent"场景下提示用户这段回答的来源），为空时行为与原有逻辑完全一致。
-// 两种路径最终都会把拼接得到的完整回复持久化为一条 agent 消息。
-func (s *WorkspaceServer) streamA2AReply(ctx context.Context, stream agenteamv1.WorkspaceService_SendMessageStreamServer,
-	teamID string, agent *agenteamv1.Agent, content string, prefix string) error {
+// 对端在流式过程中产生的工具调用过程事件（对端 Agent 调用了某个工具）会记入 rec 的
+// 工具调用列表并转发给前端；对端不支持该扩展、或走非流式路径时不会产生工具调用记录。
+// 只负责"生成"，落库与发送 done 由 SendMessageStream 统一收尾。
+func (s *WorkspaceServer) streamA2AReply(ctx context.Context, rec *streamRecorder, agent *agenteamv1.Agent, content string) error {
 	if agent.A2AConfig == nil || agent.A2AConfig.EndpointUrl == "" {
 		return status.Error(codes.FailedPrecondition, "该 Agent 尚未配置 A2A 接入地址")
 	}
@@ -384,53 +403,28 @@ func (s *WorkspaceServer) streamA2AReply(ctx context.Context, stream agenteamv1.
 		if err != nil {
 			return status.Errorf(codes.Unavailable, "调用 A2A Agent 失败: %v", err)
 		}
-		full := prefix + reply
-		if full != "" {
-			if err := stream.Send(&agenteamv1.SendMessageStreamResponse{Delta: full}); err != nil {
-				return err
-			}
-		}
-		agentMsg, err := s.persistAgentReply(ctx, teamID, agent.Id, full)
-		if err != nil {
-			return status.Errorf(codes.Internal, "保存回复失败: %v", err)
-		}
-		return stream.Send(&agenteamv1.SendMessageStreamResponse{Done: true, AgentMessage: agentMsg})
+		return rec.sendDelta(reply)
 	}
 
 	chunks, err := s.A2A.SendMessageStream(ctx, cfg, content)
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "调用 A2A Agent 失败: %v", err)
 	}
-
-	var full strings.Builder
-	if prefix != "" {
-		full.WriteString(prefix)
-		if err := stream.Send(&agenteamv1.SendMessageStreamResponse{Delta: prefix}); err != nil {
-			return err
-		}
-	}
 	for chunk := range chunks {
 		if chunk.Err != nil {
-			// 已生成的部分内容仍落库，保留与前端展示一致的历史记录。
-			if full.Len() > 0 {
-				s.persistAgentReply(ctx, teamID, agent.Id, full.String()+chunk.Err.Error())
-			}
 			return status.Errorf(codes.Unavailable, "调用 A2A Agent 失败: %v", chunk.Err)
 		}
-		if chunk.Delta == "" {
+		if chunk.Tool != nil {
+			if err := rec.onA2ATool(chunk.Tool); err != nil {
+				return err
+			}
 			continue
 		}
-		full.WriteString(chunk.Delta)
-		if err := stream.Send(&agenteamv1.SendMessageStreamResponse{Delta: chunk.Delta}); err != nil {
+		if err := rec.sendDelta(chunk.Delta); err != nil {
 			return err
 		}
 	}
-
-	agentMsg, err := s.persistAgentReply(ctx, teamID, agent.Id, full.String())
-	if err != nil {
-		return status.Errorf(codes.Internal, "保存回复失败: %v", err)
-	}
-	return stream.Send(&agenteamv1.SendMessageStreamResponse{Done: true, AgentMessage: agentMsg})
+	return nil
 }
 
 // ListMessages 返回团队的历史聊天记录。
@@ -660,4 +654,18 @@ func parseDelegation(calls []llm.ToolCall, siblings map[string]*agenteamv1.Agent
 // 便于在不改动前端展示逻辑的前提下也能直观确认委派确实发生了。
 func delegationPrefix(target *agenteamv1.Agent) string {
 	return fmt.Sprintf("_由子 Agent「%s」处理：_\n\n", target.Name)
+}
+
+// delegationToolLabel 是委派这次"工具调用"在界面上的展示名称（面向用户，不暴露内部的 delegate_to_agent / agent id）。
+func delegationToolLabel(target *agenteamv1.Agent) string {
+	return fmt.Sprintf("子 Agent「%s」", target.Name)
+}
+
+// delegationArgsJSON 把转交给子 Agent 的请求内容序列化成工具入参的 JSON 字符串。
+func delegationArgsJSON(message string) string {
+	b, err := json.Marshal(map[string]string{"message": message})
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }

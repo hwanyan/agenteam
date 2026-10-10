@@ -25,13 +25,48 @@ type Store struct {
 }
 
 // messageDoc 是聊天记录在 MongoDB 中的文档结构。
+// reasoning / tool_calls 是后加的可选字段：历史文档里没有它们，读取时按零值处理即可，
+// 无需做数据迁移（这正是聊天记录选用文档库的原因）。
 type messageDoc struct {
+	ID        string        `bson:"id"`
+	TeamID    string        `bson:"team_id"`
+	AgentID   string        `bson:"agent_id"`
+	Role      int32         `bson:"role"`
+	Content   string        `bson:"content"`
+	CreatedAt int64         `bson:"created_at"`
+	Reasoning string        `bson:"reasoning,omitempty"`
+	ToolCalls []toolCallDoc `bson:"tool_calls,omitempty"`
+}
+
+// toolCallDoc 是一次工具调用展示信息在 MongoDB 中的结构，与 agenteamv1.ToolCallInfo 一一对应。
+type toolCallDoc struct {
 	ID        string `bson:"id"`
-	TeamID    string `bson:"team_id"`
-	AgentID   string `bson:"agent_id"`
-	Role      int32  `bson:"role"`
-	Content   string `bson:"content"`
-	CreatedAt int64  `bson:"created_at"`
+	Name      string `bson:"name"`
+	Kind      string `bson:"kind"`
+	Arguments string `bson:"arguments,omitempty"`
+	Status    string `bson:"status"`
+}
+
+func toToolCallDocs(calls []*agenteamv1.ToolCallInfo) []toolCallDoc {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]toolCallDoc, 0, len(calls))
+	for _, c := range calls {
+		out = append(out, toolCallDoc{ID: c.Id, Name: c.Name, Kind: c.Kind, Arguments: c.Arguments, Status: c.Status})
+	}
+	return out
+}
+
+func fromToolCallDocs(docs []toolCallDoc) []*agenteamv1.ToolCallInfo {
+	if len(docs) == 0 {
+		return nil
+	}
+	out := make([]*agenteamv1.ToolCallInfo, 0, len(docs))
+	for _, d := range docs {
+		out = append(out, &agenteamv1.ToolCallInfo{Id: d.ID, Name: d.Name, Kind: d.Kind, Arguments: d.Arguments, Status: d.Status})
+	}
+	return out
 }
 
 // New 创建 MongoDB Store：建立连接、做连通性检查，并确保索引存在。
@@ -78,6 +113,8 @@ func (s *Store) AppendMessage(ctx context.Context, msg *agenteamv1.ChatMessage) 
 		Role:      int32(msg.Role),
 		Content:   msg.Content,
 		CreatedAt: msg.CreatedAt,
+		Reasoning: msg.Reasoning,
+		ToolCalls: toToolCallDocs(msg.ToolCalls),
 	}
 	if _, err := s.coll.InsertOne(ctx, doc); err != nil {
 		return fmt.Errorf("mongostore: insert message: %w", err)
@@ -109,6 +146,8 @@ func (s *Store) ListMessages(ctx context.Context, teamID string) ([]*agenteamv1.
 			Role:      agenteamv1.MessageRole(doc.Role),
 			Content:   doc.Content,
 			CreatedAt: doc.CreatedAt,
+			Reasoning: doc.Reasoning,
+			ToolCalls: fromToolCallDocs(doc.ToolCalls),
 		})
 	}
 	if err := cur.Err(); err != nil {

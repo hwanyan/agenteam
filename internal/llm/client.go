@@ -63,7 +63,10 @@ type ToolCall struct {
 //   - 若模型决定调用某个 Tool（如委派给子 Agent），ToolCalls 非空，Content 通常为空，
 //     调用方需自行执行对应逻辑后决定下一步（当前平台只走一轮委派，不做多轮 tool loop）。
 type ChatResult struct {
-	Content   string
+	Content string
+	// Reasoning 是模型的思考过程（如 DeepSeek Reasoner 的 reasoning_content）；
+	// 模型不提供思考内容时为空。仅用于展示，不会回传给模型。
+	Reasoning string
 	ToolCalls []ToolCall
 }
 
@@ -75,7 +78,10 @@ type ChatResult struct {
 // 之后不会再有更多 chunk 写入该 channel）。
 type StreamChunk struct {
 	Delta string
-	Err   error
+	// Reasoning 是思考过程的增量文本，与 Delta（正文）互斥：同一个 chunk 只会携带其中一种。
+	// 模型不提供思考内容时始终为空。
+	Reasoning string
+	Err       error
 }
 
 // Client 定义与 LLM 对话的能力，方便替换/测试。
