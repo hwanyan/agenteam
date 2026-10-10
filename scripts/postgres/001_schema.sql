@@ -80,7 +80,9 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
     api_key         TEXT NOT NULL DEFAULT '',
     timeout_seconds INTEGER NOT NULL DEFAULT 30,
     created_at      BIGINT NOT NULL,
-    updated_at      BIGINT NOT NULL
+    updated_at      BIGINT NOT NULL,
+    -- 一个团队下同一个 base_url 只能被引入一次（后端据此约束名区分 id 冲突与 base_url 重复）。
+    CONSTRAINT uq_mcp_tools_team_base_url UNIQUE (team_id, base_url)
 );
 
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_team_id ON mcp_tools (team_id);

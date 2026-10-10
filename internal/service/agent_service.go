@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -283,10 +284,13 @@ func (s *AgentServer) CreateMcpTool(ctx context.Context, req *agenteamv1.CreateM
 	if _, err := s.Store.GetTeam(ctx, req.TeamId); err != nil {
 		return nil, teamNotFoundOrErr(err)
 	}
-	if req.Name == "" {
+	// 首尾空白不参与比较：避免 " https://a/mcp" 与 "https://a/mcp" 绕过 (team_id, base_url) 唯一约束。
+	name := strings.TrimSpace(req.Name)
+	baseURL := strings.TrimSpace(req.BaseUrl)
+	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "MCP 工具名称不能为空")
 	}
-	if req.BaseUrl == "" {
+	if baseURL == "" {
 		return nil, status.Error(codes.InvalidArgument, "base_url 不能为空")
 	}
 
@@ -298,21 +302,25 @@ func (s *AgentServer) CreateMcpTool(ctx context.Context, req *agenteamv1.CreateM
 	now := time.Now().Unix()
 	tool := &agenteamv1.McpTool{
 		TeamId:         req.TeamId,
-		Name:           req.Name,
-		BaseUrl:        req.BaseUrl,
+		Name:           name,
+		BaseUrl:        baseURL,
 		TimeoutSeconds: timeout,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 
 	// id 始终由 tools.NewMCPToolID 随机生成（36^6 ≈ 21.8 亿的随机空间，
-	// 理论上仍存在极小概率的冲突），遇到冲突（store.ErrAlreadyExists）时重新生成并重试。
+	// 理论上仍存在极小概率的冲突），遇到 id 冲突（store.ErrAlreadyExists）时重新生成并重试；
+	// 同一团队下 base_url 重复（store.ErrMcpToolBaseURLTaken）重试无意义，直接返回给用户。
 	const maxAutoIDAttempts = 10
 	for attempt := 1; ; attempt++ {
 		tool.Id = tools.NewMCPToolID("mcp_tool")
 		err := s.Store.CreateMcpTool(ctx, tool, req.ApiKey)
 		if err == nil {
 			break
+		}
+		if errors.Is(err, store.ErrMcpToolBaseURLTaken) {
+			return nil, status.Error(codes.AlreadyExists, "该团队下已接入过相同 base_url 的 MCP 工具，同一个 base_url 只能引入一次")
 		}
 		if !errors.Is(err, store.ErrAlreadyExists) {
 			return nil, status.Errorf(codes.Internal, "接入 MCP 工具失败: %v", err)
@@ -343,10 +351,12 @@ func (s *AgentServer) UpdateMcpTool(ctx context.Context, req *agenteamv1.UpdateM
 	if err != nil {
 		return nil, mcpToolNotFoundOrErr(err)
 	}
-	if req.Name == "" {
+	name := strings.TrimSpace(req.Name)
+	baseURL := strings.TrimSpace(req.BaseUrl)
+	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "MCP 工具名称不能为空")
 	}
-	if req.BaseUrl == "" {
+	if baseURL == "" {
 		return nil, status.Error(codes.InvalidArgument, "base_url 不能为空")
 	}
 
@@ -358,8 +368,8 @@ func (s *AgentServer) UpdateMcpTool(ctx context.Context, req *agenteamv1.UpdateM
 	updated := &agenteamv1.McpTool{
 		Id:             existing.Id,
 		TeamId:         existing.TeamId,
-		Name:           req.Name,
-		BaseUrl:        req.BaseUrl,
+		Name:           name,
+		BaseUrl:        baseURL,
 		TimeoutSeconds: timeout,
 		CreatedAt:      existing.CreatedAt,
 		UpdatedAt:      time.Now().Unix(),
@@ -383,6 +393,9 @@ func (s *AgentServer) UpdateMcpTool(ctx context.Context, req *agenteamv1.UpdateM
 func mcpToolNotFoundOrErr(err error) error {
 	if errors.Is(err, store.ErrNotFound) {
 		return status.Error(codes.NotFound, "MCP 工具不存在")
+	}
+	if errors.Is(err, store.ErrMcpToolBaseURLTaken) {
+		return status.Error(codes.AlreadyExists, "该团队下已接入过相同 base_url 的 MCP 工具，同一个 base_url 只能引入一次")
 	}
 	return status.Errorf(codes.Internal, "%v", err)
 }

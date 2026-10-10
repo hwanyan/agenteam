@@ -26,6 +26,10 @@ var ErrMainAgentProtected = errors.New("main agent cannot be deleted individuall
 // ErrAlreadyExists 表示尝试创建的资源 id 已存在（如自定义 MCP 工具 id 冲突）。
 var ErrAlreadyExists = errors.New("already exists")
 
+// ErrMcpToolBaseURLTaken 表示同一团队下已经接入过相同 base_url 的自定义 MCP 工具
+// （对应 mcp_tools 表 (team_id, base_url) 唯一约束）：一个团队下同一个 base_url 只能被引入一次。
+var ErrMcpToolBaseURLTaken = errors.New("mcp tool base_url already exists in team")
+
 // Store 是业务层依赖的统一存储接口。
 type Store interface {
 	// CreateTeam 原子性地创建团队及其主 Agent（两者互相引用，需保证一致性）。
@@ -36,7 +40,6 @@ type Store interface {
 	ListTeams(ctx context.Context) ([]*pb.Team, error)
 	// DeleteTeam 删除团队及其全部 Agent、聊天记录。
 	DeleteTeam(ctx context.Context, id string) error
-
 	// SaveAgent 新增或更新一个 Agent（保存配置并落库最新 version/status）。
 	SaveAgent(ctx context.Context, agent *pb.Agent) error
 	// GetAgent 按 id 查询 Agent。
@@ -45,12 +48,6 @@ type Store interface {
 	ListAgentsByTeam(ctx context.Context, teamID string) ([]*pb.Agent, error)
 	// DeleteAgent 删除一个非主 Agent；若目标是主 Agent 则返回 ErrMainAgentProtected。
 	DeleteAgent(ctx context.Context, id string) error
-
-	// AppendMessage 追加一条工作区聊天记录。
-	AppendMessage(ctx context.Context, msg *pb.ChatMessage) error
-	// ListMessages 返回指定团队的历史聊天记录，按时间升序排列。
-	ListMessages(ctx context.Context, teamID string) ([]*pb.ChatMessage, error)
-
 	// CreateMcpTool 在指定团队下接入一个自定义 MCP 工具；tool.Id 必须由调用方
 	// （internal/service，通过 internal/tools.NewMCPToolID）预先生成好。apiKey 为明文，
 	// 仅落库使用，任何查询接口都不会回显（对应 tool.ApiKeySet 只读标记）。若 id 与已存在的
@@ -66,6 +63,11 @@ type Store interface {
 	// UpdateMcpTool 更新一个自定义 MCP 工具的配置；apiKey 为空指针表示"不修改现有密钥"，
 	// 非空则覆盖为新值（区分"传空字符串以清空密钥"与"未提供密钥"两种语义）。
 	UpdateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey *string) error
+
+	// AppendMessage 追加一条工作区聊天记录。
+	AppendMessage(ctx context.Context, msg *pb.ChatMessage) error
+	// ListMessages 返回指定团队的历史聊天记录，按时间升序排列。
+	ListMessages(ctx context.Context, teamID string) ([]*pb.ChatMessage, error)
 }
 
 // TeamAgentStore 是 Store 中“团队 / Agent / 自定义 MCP 工具”相关能力的子接口，由 PostgreSQL 实现。

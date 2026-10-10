@@ -21,10 +21,15 @@ import (
 // pgUniqueViolation 是 PostgreSQL 唯一约束冲突（duplicate key）的 SQLSTATE。
 const pgUniqueViolation = "23505"
 
+// mcpToolTeamBaseURLConstraint 是 mcp_tools 表 (team_id, base_url) 唯一约束的名称，
+// 与 scripts/postgres/001_schema.sql、20261010_mcp_tools_team_base_url_unique.sql 保持一致。
+const mcpToolTeamBaseURLConstraint = "uq_mcp_tools_team_base_url"
+
 // CreateMcpTool 在指定团队下接入一个自定义 MCP 工具。tool.Id/tool.TeamId 必须由调用方
 // （internal/service）预先生成/校验好——默认 id 由 internal/tools.NewMCPToolID 生成随机
 // 短 id，本层不负责生成默认 id，只负责落库；apiKey 明文只落库，任何查询都不会回显。
-// 若 id 与已存在的自定义工具冲突，返回 store.ErrAlreadyExists。
+// 若 id 与已存在的自定义工具冲突，返回 store.ErrAlreadyExists；若同一团队下 base_url 已被
+// 接入过，返回 store.ErrMcpToolBaseURLTaken。
 func (s *Store) CreateMcpTool(ctx context.Context, tool *agenteamv1.McpTool, apiKey string) error {
 	if tool.Id == "" {
 		return fmt.Errorf("postgres: mcp tool id 不能为空，应由调用方生成后再落库")
@@ -38,7 +43,10 @@ func (s *Store) CreateMcpTool(ctx context.Context, tool *agenteamv1.McpTool, api
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, tool.Id, tool.TeamId, tool.Name, tool.BaseUrl, apiKey, tool.TimeoutSeconds, tool.CreatedAt, tool.UpdatedAt)
 	if err != nil {
-		if isUniqueViolation(err) {
+		if constraint, ok := uniqueViolationConstraint(err); ok {
+			if constraint == mcpToolTeamBaseURLConstraint {
+				return fmt.Errorf("同一团队下已接入过相同的 base_url: %s: %w", tool.BaseUrl, store.ErrMcpToolBaseURLTaken)
+			}
 			return fmt.Errorf("mcp tool id 已存在: %s: %w", tool.Id, store.ErrAlreadyExists)
 		}
 		return fmt.Errorf("postgres: insert mcp tool: %w", err)
@@ -111,6 +119,9 @@ func (s *Store) UpdateMcpTool(ctx context.Context, tool *agenteamv1.McpTool, api
 		`, tool.Name, tool.BaseUrl, tool.TimeoutSeconds, tool.UpdatedAt, tool.Id)
 	}
 	if err != nil {
+		if constraint, ok := uniqueViolationConstraint(err); ok && constraint == mcpToolTeamBaseURLConstraint {
+			return fmt.Errorf("同一团队下已接入过相同的 base_url: %s: %w", tool.BaseUrl, store.ErrMcpToolBaseURLTaken)
+		}
 		return fmt.Errorf("postgres: update mcp tool: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
@@ -119,11 +130,12 @@ func (s *Store) UpdateMcpTool(ctx context.Context, tool *agenteamv1.McpTool, api
 	return nil
 }
 
-// isUniqueViolation 判断错误是否为 PostgreSQL 唯一约束冲突（如 id 主键重复）。
-func isUniqueViolation(err error) bool {
+// uniqueViolationConstraint 判断错误是否为 PostgreSQL 唯一约束冲突，并返回触发冲突的
+// 约束名（用于区分"id 主键重复"与"(team_id, base_url) 唯一约束冲突"两种语义不同的冲突）。
+func uniqueViolationConstraint(err error) (string, bool) {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == pgUniqueViolation
+	if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+		return pgErr.ConstraintName, true
 	}
-	return false
+	return "", false
 }
