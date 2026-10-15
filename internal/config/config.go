@@ -42,10 +42,10 @@ func Load() *Config {
 		PostgresDSN: getenv("AGENTEAM_POSTGRES_DSN",
 			"postgres://localhost:5432/agenteam?sslmode=disable"),
 
-		RedisDSN: getenv("AGENTEAM_REDIS_DSN", "redis://127.0.0.1:6379/0"),
-
 		MongoURI:      getenv("AGENTEAM_MONGO_URI", "mongodb://127.0.0.1:27017"),
 		MongoDatabase: getenv("AGENTEAM_MONGO_DATABASE", "agenteam"),
+
+		RedisDSN: getenv("AGENTEAM_REDIS_DSN", "redis://127.0.0.1:6379/0"),
 
 		DeepSeekAPIKey:  getenv("DEEPSEEK_API_KEY", ""),
 		DeepSeekBaseURL: getenv("DEEPSEEK_BASE_URL", ""),
