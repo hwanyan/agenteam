@@ -22,8 +22,10 @@ import (
 // pgUniqueViolation 是 PostgreSQL 唯一约束冲突（duplicate key）的 SQLSTATE。
 const pgUniqueViolation = "23505"
 
-// mcpToolTeamBaseURLConstraint 是 mcp_tools 表 (team_id, base_url) 唯一约束的名称，
-// 与 scripts/postgres/001_schema.sql、20261010_mcp_tools_team_base_url_unique.sql 保持一致。
+// mcpToolTeamBaseURLConstraint 是 mcp_tools 表 (team_id, base_url) 部分唯一索引
+// （WHERE deleted_at IS NULL，软删除的行不占用）的名称。唯一索引冲突时 PostgreSQL 返回的
+// ConstraintName 即索引名，与 scripts/postgres/001_schema.sql、
+// 20261016_mcp_tools_base_url_partial_unique.sql 保持一致。
 const mcpToolTeamBaseURLConstraint = "uq_mcp_tools_team_base_url"
 
 // CreateMcpTool 在指定团队下接入一个自定义 MCP 工具。tool.Id/tool.TeamId 必须由调用方
@@ -60,7 +62,7 @@ func (s *Store) CreateMcpTool(ctx context.Context, tool *agenteamv1.McpTool, api
 func (s *Store) ListMcpToolsByTeam(ctx context.Context, teamID string) ([]*agenteamv1.McpTool, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, team_id, name, base_url, (api_key <> ''), timeout_seconds, created_at, updated_at
-		FROM mcp_tools WHERE team_id = $1 ORDER BY created_at ASC
+		FROM mcp_tools WHERE team_id = $1 AND deleted_at IS NULL ORDER BY created_at ASC
 	`, teamID)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list mcp tools by team: %w", err)
@@ -86,7 +88,7 @@ func (s *Store) ListMcpToolsByTeam(ctx context.Context, teamID string) ([]*agent
 func (s *Store) GetMcpTool(ctx context.Context, id string) (*agenteamv1.McpTool, string, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, team_id, name, base_url, api_key, timeout_seconds, created_at, updated_at
-		FROM mcp_tools WHERE id = $1
+		FROM mcp_tools WHERE id = $1 AND deleted_at IS NULL
 	`, id)
 	var t agenteamv1.McpTool
 	var apiKey string
@@ -111,12 +113,12 @@ func (s *Store) UpdateMcpTool(ctx context.Context, tool *agenteamv1.McpTool, api
 	if apiKey != nil {
 		tag, err = s.pool.Exec(ctx, `
 			UPDATE mcp_tools SET name = $1, base_url = $2, api_key = $3, timeout_seconds = $4, updated_at = $5
-			WHERE id = $6
+			WHERE id = $6 AND deleted_at IS NULL
 		`, tool.Name, tool.BaseUrl, *apiKey, tool.TimeoutSeconds, tool.UpdatedAt, tool.Id)
 	} else {
 		tag, err = s.pool.Exec(ctx, `
 			UPDATE mcp_tools SET name = $1, base_url = $2, timeout_seconds = $3, updated_at = $4
-			WHERE id = $5
+			WHERE id = $5 AND deleted_at IS NULL
 		`, tool.Name, tool.BaseUrl, tool.TimeoutSeconds, tool.UpdatedAt, tool.Id)
 	}
 	if err != nil {
@@ -131,8 +133,12 @@ func (s *Store) UpdateMcpTool(ctx context.Context, tool *agenteamv1.McpTool, api
 	return nil
 }
 
-// DeleteMcpTool 在同一事务内删除一个自定义 MCP 工具，并把所属团队下所有 Agent 的
-// agents.mcp_tools 里对它的引用移除。
+// DeleteMcpTool 在同一事务内软删除一个自定义 MCP 工具（只写 deleted_at），并把所属团队下
+// 所有未删除 Agent 的 agents.mcp_tools 里对它的引用移除。
+//
+// 软删除的行不再占用 (team_id, base_url) 唯一索引（该索引是 WHERE deleted_at IS NULL 的
+// 部分唯一索引），因此同一团队之后可以用相同的 base_url 重新接入，得到一条全新的记录，
+// 历史软删除记录原样保留。
 //
 // agents.mcp_tools 是 TEXT[]，只存工具 id，和 mcp_tools 表之间没有外键，数据库不会
 // 自动联动；不在这里同步清理的话，Agent 配置里就会残留已不存在的工具 id。
@@ -146,18 +152,20 @@ func (s *Store) DeleteMcpTool(ctx context.Context, id string) ([]string, error) 
 	defer func() { _ = tx.Rollback(ctx) }() // 已 Commit 时 Rollback 为 no-op
 
 	var teamID string
-	if err := tx.QueryRow(ctx, `DELETE FROM mcp_tools WHERE id = $1 RETURNING team_id`, id).Scan(&teamID); err != nil {
+	if err := tx.QueryRow(ctx, `
+		UPDATE mcp_tools SET deleted_at = $2 WHERE id = $1 AND deleted_at IS NULL RETURNING team_id
+	`, id, time.Now().Unix()).Scan(&teamID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
-		return nil, fmt.Errorf("postgres: delete mcp tool: %w", err)
+		return nil, fmt.Errorf("postgres: soft delete mcp tool: %w", err)
 	}
 
 	// 仅清理同团队 Agent：自定义工具按团队隔离，其他团队的 Agent 不可能绑定过它。
 	rows, err := tx.Query(ctx, `
 		UPDATE agents
 		SET mcp_tools = array_remove(mcp_tools, $1::text), version = version + 1, updated_at = $3
-		WHERE team_id = $2 AND $1::text = ANY(mcp_tools)
+		WHERE team_id = $2 AND deleted_at IS NULL AND $1::text = ANY(mcp_tools)
 		RETURNING id
 	`, id, teamID, time.Now().Unix())
 	if err != nil {

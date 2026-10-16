@@ -124,7 +124,8 @@ func (s *TeamServer) GetTeam(ctx context.Context, req *agenteamv1.GetTeamRequest
 	return &agenteamv1.GetTeamResponse{Team: team}, nil
 }
 
-// DeleteTeam 删除团队及其主 Agent、聊天记录。
+// DeleteTeam 软删除团队及其全部 Agent（PG 单事务，成功即对外不可见）。
+// 聊天记录软删除与各 Agent 运行态缓存卸载由后台清理 worker（internal/cleanup）异步完成。
 func (s *TeamServer) DeleteTeam(ctx context.Context, req *agenteamv1.DeleteTeamRequest) (*agenteamv1.DeleteTeamResponse, error) {
 	team, err := s.Store.GetTeam(ctx, req.Id)
 	if err != nil {

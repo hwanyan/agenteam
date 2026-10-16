@@ -1,4 +1,6 @@
 -- 变更：mcp_tools 表新增 (team_id, base_url) 唯一约束——一个团队下同一个 base_url 只能被引入一次。
+-- （2026-10-16 起该约束已被 20261016_mcp_tools_base_url_partial_unique.sql 改为部分唯一索引，
+--  新环境直接跑 001_schema.sql 即可，无需执行本脚本。）
 -- 约束名 uq_mcp_tools_team_base_url 与后端 internal/store/postgres/mcp_tool.go 中的
 -- mcpToolTeamBaseURLConstraint 保持一致（后端据此区分 "id 冲突" 与 "base_url 重复"）。
 --

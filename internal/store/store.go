@@ -38,8 +38,14 @@ type Store interface {
 	GetTeam(ctx context.Context, id string) (*pb.Team, error)
 	// ListTeams 返回全部团队，按创建时间升序排列。
 	ListTeams(ctx context.Context) ([]*pb.Team, error)
-	// DeleteTeam 删除团队及其全部 Agent、聊天记录。
+	// DeleteTeam 软删除团队及其全部 Agent、自定义 MCP 工具（单个 PG 事务，成功即对外不可见）。
+	// 聊天记录的软删除与运行态缓存卸载不在此同步完成，而是由后台清理 worker
+	// （internal/cleanup）通过 ListDeletedTeamsPendingCleanup / CleanupDeletedTeam 异步完成。
 	DeleteTeam(ctx context.Context, id string) error
+	// ListDeletedTeamsPendingCleanup 返回已软删除、尚未完成清理的团队（按删除时间升序，最多 limit 个）。
+	ListDeletedTeamsPendingCleanup(ctx context.Context, limit int) ([]*DeletedTeam, error)
+	// CleanupDeletedTeam 软删除指定团队的聊天记录，并把团队标记为清理完成。幂等，失败后可安全重试。
+	CleanupDeletedTeam(ctx context.Context, id string) error
 	// SaveAgent 新增或更新一个 Agent（保存配置并落库最新 version/status）。
 	SaveAgent(ctx context.Context, agent *pb.Agent) error
 	// GetAgent 按 id 查询 Agent。
@@ -63,7 +69,7 @@ type Store interface {
 	// UpdateMcpTool 更新一个自定义 MCP 工具的配置；apiKey 为空指针表示"不修改现有密钥"，
 	// 非空则覆盖为新值（区分"传空字符串以清空密钥"与"未提供密钥"两种语义）。
 	UpdateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey *string) error
-	// DeleteMcpTool 删除一个自定义 MCP 工具，并在同一事务内把所属团队下所有 Agent 的
+	// DeleteMcpTool 软删除一个自定义 MCP 工具（释放其 base_url，同团队可重新接入），并在同一事务内把所属团队下所有 Agent 的
 	// agents.mcp_tools 里对它的引用一并移除（该数组只存 id、没有外键，不清理就会残留失效 id）。
 	// 返回被清理了引用的 Agent id 列表；工具不存在返回 ErrNotFound。
 	DeleteMcpTool(ctx context.Context, id string) (affectedAgentIDs []string, err error)
@@ -79,8 +85,12 @@ type TeamAgentStore interface {
 	CreateTeam(ctx context.Context, team *pb.Team, mainAgent *pb.Agent) error
 	GetTeam(ctx context.Context, id string) (*pb.Team, error)
 	ListTeams(ctx context.Context) ([]*pb.Team, error)
-	// DeleteTeamAndAgents 仅删除关系型库中的团队与其 Agent（不涉及聊天记录），由上层组合实现负责协调跨库删除。
-	DeleteTeamAndAgents(ctx context.Context, id string) error
+	// SoftDeleteTeam 仅软删除关系型库中的团队与其 Agent（不涉及聊天记录），不存在或已删除返回 ErrNotFound。
+	SoftDeleteTeam(ctx context.Context, id string) error
+	// ListDeletedTeamsPendingCleanup 返回已软删除、尚未完成清理的团队及其全部 Agent id。
+	ListDeletedTeamsPendingCleanup(ctx context.Context, limit int) ([]*DeletedTeam, error)
+	// MarkTeamCleaned 标记团队清理完成（幂等）。
+	MarkTeamCleaned(ctx context.Context, id string) error
 	SaveAgent(ctx context.Context, agent *pb.Agent) error
 	GetAgent(ctx context.Context, id string) (*pb.Agent, error)
 	ListAgentsByTeam(ctx context.Context, teamID string) ([]*pb.Agent, error)
@@ -96,8 +106,15 @@ type TeamAgentStore interface {
 type MessageStore interface {
 	AppendMessage(ctx context.Context, msg *pb.ChatMessage) error
 	ListMessages(ctx context.Context, teamID string) ([]*pb.ChatMessage, error)
-	// DeleteByTeam 删除指定团队的全部聊天记录。
-	DeleteByTeam(ctx context.Context, teamID string) error
+	// SoftDeleteByTeam 软删除指定团队的全部聊天记录（幂等）；被软删除的记录不会再被 ListMessages 返回。
+	SoftDeleteByTeam(ctx context.Context, teamID string) error
+}
+
+// DeletedTeam 是一个已软删除、等待后台清理的团队。
+type DeletedTeam struct {
+	ID string
+	// AgentIDs 是该团队下全部 Agent 的 id（含已软删除的），用于清理运行态缓存。
+	AgentIDs []string
 }
 
 // composite 将“关系型库(Team/Agent)”与“文档库(ChatMessage)”组合为统一的 Store，
@@ -124,15 +141,26 @@ func (c *composite) ListTeams(ctx context.Context) ([]*pb.Team, error) {
 	return c.teams.ListTeams(ctx)
 }
 
-// DeleteTeam 删除团队及其 Agent（PostgreSQL，级联）与聊天记录（MongoDB）。
-// 两个数据库之间没有分布式事务，这里采用“先删关系型主数据，再清理聊天记录”的顺序：
-// 万一后半步失败，至多残留孤立的聊天记录，不会影响团队/Agent 数据的一致性，
-// 属于可接受的最终一致性权衡。
+// DeleteTeam 软删除团队及其 Agent（PostgreSQL 单事务）。
+// 两个数据库之间没有分布式事务，因此这里只做 PG 一侧：PG 里 teams.deleted_at 本身就是
+// “待清理”的可靠记录，聊天记录（MongoDB）的软删除交给后台 worker 通过
+// ListDeletedTeamsPendingCleanup + CleanupDeletedTeam 异步完成并重试，最终一致，
+// 不再有“PG 已删、Mongo 失败后无人重试”的问题。
 func (c *composite) DeleteTeam(ctx context.Context, id string) error {
-	if err := c.teams.DeleteTeamAndAgents(ctx, id); err != nil {
+	return c.teams.SoftDeleteTeam(ctx, id)
+}
+
+func (c *composite) ListDeletedTeamsPendingCleanup(ctx context.Context, limit int) ([]*DeletedTeam, error) {
+	return c.teams.ListDeletedTeamsPendingCleanup(ctx, limit)
+}
+
+// CleanupDeletedTeam 先软删除聊天记录，成功后才标记团队清理完成：
+// 任何一步失败都不会标记，团队会留在待清理队列里等待下一轮重试；两步均幂等。
+func (c *composite) CleanupDeletedTeam(ctx context.Context, id string) error {
+	if err := c.messages.SoftDeleteByTeam(ctx, id); err != nil {
 		return err
 	}
-	return c.messages.DeleteByTeam(ctx, id)
+	return c.teams.MarkTeamCleaned(ctx, id)
 }
 
 func (c *composite) SaveAgent(ctx context.Context, agent *pb.Agent) error {

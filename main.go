@@ -24,6 +24,7 @@ import (
 
 	"github.com/hwanyan/agenteam/internal/a2a"
 	"github.com/hwanyan/agenteam/internal/cache"
+	"github.com/hwanyan/agenteam/internal/cleanup"
 	"github.com/hwanyan/agenteam/internal/config"
 	"github.com/hwanyan/agenteam/internal/llm"
 	"github.com/hwanyan/agenteam/internal/store"
@@ -76,6 +77,11 @@ func main() {
 		LLM:     llm.New(cfg.DeepSeekAPIKey, cfg.DeepSeekBaseURL),
 		A2A:     a2a.New(),
 	}
+
+	// 后台清理 worker：异步完成团队软删除后的收尾（卸载 Agent 运行态缓存、软删除聊天记录）。
+	cleanupCtx, stopCleanup := context.WithCancel(context.Background())
+	defer stopCleanup()
+	go cleanup.New(st, deps.Runtime, cleanup.DefaultInterval, cleanup.DefaultBatchSize).Run(cleanupCtx)
 
 	teamSrv := service.NewTeamServer(deps)
 	agentSrv := service.NewAgentServer(deps)

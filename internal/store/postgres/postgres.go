@@ -1,5 +1,8 @@
 // Package postgres 提供 teams / agents 的 PostgreSQL 存储实现。
 //
+// teams / agents 采用软删除（deleted_at）：所有读取都过滤 deleted_at IS NULL，
+// 删除团队见 SoftDeleteTeam。
+//
 // team 与其主 agent 存在"循环引用"（team.main_agent_id -> agents.id，
 // agent.team_id -> teams.id）。scripts/postgres/001_schema.sql 只对
 // agents.team_id 声明了外键（agents 表晚于 teams 表创建，可以内联 REFERENCES），
@@ -13,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -135,7 +139,7 @@ func (s *Store) CreateTeam(ctx context.Context, team *agenteamv1.Team, mainAgent
 // GetTeam 按 id 查询团队。
 func (s *Store) GetTeam(ctx context.Context, id string) (*agenteamv1.Team, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, name, main_agent_id, created_at, updated_at FROM teams WHERE id = $1
+		SELECT id, name, main_agent_id, created_at, updated_at FROM teams WHERE id = $1 AND deleted_at IS NULL
 	`, id)
 	var t agenteamv1.Team
 	if err := row.Scan(&t.Id, &t.Name, &t.MainAgentId, &t.CreatedAt, &t.UpdatedAt); err != nil {
@@ -150,7 +154,7 @@ func (s *Store) GetTeam(ctx context.Context, id string) (*agenteamv1.Team, error
 // ListTeams 返回全部团队，按创建时间升序排列。
 func (s *Store) ListTeams(ctx context.Context) ([]*agenteamv1.Team, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, main_agent_id, created_at, updated_at FROM teams ORDER BY created_at ASC
+		SELECT id, name, main_agent_id, created_at, updated_at FROM teams WHERE deleted_at IS NULL ORDER BY created_at ASC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list teams: %w", err)
@@ -171,14 +175,78 @@ func (s *Store) ListTeams(ctx context.Context) ([]*agenteamv1.Team, error) {
 	return out, nil
 }
 
-// DeleteTeamAndAgents 删除团队（其下 Agent 通过外键 ON DELETE CASCADE 自动清理）。
-func (s *Store) DeleteTeamAndAgents(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM teams WHERE id = $1`, id)
+// SoftDeleteTeam 在同一事务内软删除团队及其全部 Agent 与自定义 MCP 工具。
+//
+// teams / agents / mcp_tools 都只写 deleted_at，不物理删除（所有读取都过滤 deleted_at IS NULL），
+// 因此外键 ON DELETE CASCADE 不会触发；Agent、MCP 工具在这里显式软删除，保证团队一旦不可见，
+// 其 Agent 与工具也同时不可见，不会出现“团队已删、子资源仍可按 id 访问”的窗口。
+// 被软删除的 mcp_tools 行仍保留 api_key 明文，直到后续物理清理。
+//
+// 团队不存在或已被软删除返回 store.ErrNotFound（重复调用幂等失败，不会覆盖首次删除时间）。
+// 聊天记录与运行态缓存由后台清理 worker 异步处理，见 internal/cleanup。
+func (s *Store) SoftDeleteTeam(ctx context.Context, id string) error {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("postgres: delete team: %w", err)
+		return fmt.Errorf("postgres: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // 已 Commit 时 Rollback 为 no-op
+
+	now := time.Now().Unix()
+	tag, err := tx.Exec(ctx, `UPDATE teams SET deleted_at = $2 WHERE id = $1 AND deleted_at IS NULL`, id, now)
+	if err != nil {
+		return fmt.Errorf("postgres: soft delete team: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return store.ErrNotFound
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agents SET deleted_at = $2 WHERE team_id = $1 AND deleted_at IS NULL`, id, now); err != nil {
+		return fmt.Errorf("postgres: soft delete agents: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE mcp_tools SET deleted_at = $2 WHERE team_id = $1 AND deleted_at IS NULL`, id, now); err != nil {
+		return fmt.Errorf("postgres: soft delete team mcp tools: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("postgres: commit soft delete team: %w", err)
+	}
+	return nil
+}
+
+// ListDeletedTeamsPendingCleanup 返回已软删除、尚未完成清理的团队（按删除时间升序，最多 limit 个），
+// 同时带出其全部 Agent id（含已软删除的），供清理 worker 卸载运行态缓存。
+func (s *Store) ListDeletedTeamsPendingCleanup(ctx context.Context, limit int) ([]*store.DeletedTeam, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT t.id, COALESCE((SELECT array_agg(a.id) FROM agents a WHERE a.team_id = t.id), '{}')
+		FROM teams t
+		WHERE t.deleted_at IS NOT NULL AND t.cleaned_at IS NULL
+		ORDER BY t.deleted_at ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list deleted teams pending cleanup: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*store.DeletedTeam, 0)
+	for rows.Next() {
+		var d store.DeletedTeam
+		if err := rows.Scan(&d.ID, &d.AgentIDs); err != nil {
+			return nil, fmt.Errorf("postgres: scan deleted team row: %w", err)
+		}
+		out = append(out, &d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: iterate deleted teams: %w", err)
+	}
+	return out, nil
+}
+
+// MarkTeamCleaned 标记团队清理完成。幂等：重复调用不会覆盖首次完成时间。
+func (s *Store) MarkTeamCleaned(ctx context.Context, id string) error {
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE teams SET cleaned_at = $2 WHERE id = $1 AND deleted_at IS NOT NULL AND cleaned_at IS NULL`,
+		id, time.Now().Unix(),
+	); err != nil {
+		return fmt.Errorf("postgres: mark team cleaned: %w", err)
 	}
 	return nil
 }
@@ -190,7 +258,7 @@ func (s *Store) SaveAgent(ctx context.Context, agent *agenteamv1.Agent) error {
 		return err
 	}
 	mcpTools, skills := nonNilStrings(agent.McpTools), nonNilStrings(agent.Skills)
-	_, err = s.pool.Exec(ctx, `
+	tag, err := s.pool.Exec(ctx, `
 		INSERT INTO agents (id, team_id, name, prompt, model, mcp_tools, skills, is_main, version, status, created_at, updated_at, kind, a2a_config)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		ON CONFLICT (id) DO UPDATE SET
@@ -204,13 +272,19 @@ func (s *Store) SaveAgent(ctx context.Context, agent *agenteamv1.Agent) error {
 			updated_at = EXCLUDED.updated_at,
 			kind       = EXCLUDED.kind,
 			a2a_config = EXCLUDED.a2a_config
+		WHERE agents.deleted_at IS NULL
 	`,
-		agent.Id, agent.TeamId, agent.Name, agent.Prompt, agent.Model,
+	agent.Id, agent.TeamId, agent.Name, agent.Prompt, agent.Model,
 		mcpTools, skills, agent.IsMain, agent.Version, agent.Status.String(),
 		agent.CreatedAt, agent.UpdatedAt, agentKindDBValue(agent.Kind), a2aDoc,
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: upsert agent: %w", err)
+	}
+	// 冲突行已被软删除时 DO UPDATE 的 WHERE 不成立、不会更新任何行：视为 Agent 不存在，
+	// 避免对已软删除的 Agent（如其团队刚被删除时的并发保存）悄悄写入。
+	if tag.RowsAffected() == 0 {
+		return store.ErrNotFound
 	}
 	return nil
 }
@@ -234,7 +308,7 @@ func nonNilStrings(s []string) []string {
 func (s *Store) GetAgent(ctx context.Context, id string) (*agenteamv1.Agent, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, team_id, name, prompt, model, mcp_tools, skills, is_main, version, status, created_at, updated_at, kind, a2a_config
-		FROM agents WHERE id = $1
+		FROM agents WHERE id = $1 AND deleted_at IS NULL
 	`, id)
 	return scanAgent(row)
 }
@@ -244,7 +318,7 @@ func (s *Store) GetAgent(ctx context.Context, id string) (*agenteamv1.Agent, err
 func (s *Store) ListAgentsByTeam(ctx context.Context, teamID string) ([]*agenteamv1.Agent, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, team_id, name, prompt, model, mcp_tools, skills, is_main, version, status, created_at, updated_at, kind, a2a_config
-		FROM agents WHERE team_id = $1 ORDER BY is_main DESC, created_at ASC
+		FROM agents WHERE team_id = $1 AND deleted_at IS NULL ORDER BY is_main DESC, created_at ASC
 	`, teamID)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list agents by team: %w", err)
@@ -305,7 +379,7 @@ func scanAgent(row pgx.Row) (*agenteamv1.Agent, error) {
 // 即使调用方传入主 Agent 的 id，也不会被删除，而是返回 store.ErrMainAgentProtected，
 // 从数据库层面兜底“主 Agent 不可单独删除”这一约束，不依赖业务层校验。
 func (s *Store) DeleteAgent(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM agents WHERE id = $1 AND is_main = FALSE`, id)
+	tag, err := s.pool.Exec(ctx, `DELETE FROM agents WHERE id = $1 AND is_main = FALSE AND deleted_at IS NULL`, id)
 	if err != nil {
 		return fmt.Errorf("postgres: delete agent: %w", err)
 	}

@@ -41,7 +41,12 @@ CREATE TABLE IF NOT EXISTS teams (
     name          TEXT NOT NULL,
     main_agent_id TEXT NOT NULL,
     created_at    BIGINT NOT NULL,
-    updated_at    BIGINT NOT NULL
+    updated_at    BIGINT NOT NULL,
+    -- 软删除：DeleteTeam 只写 deleted_at（Unix 秒），所有读取均过滤 deleted_at IS NULL。
+    deleted_at    BIGINT,
+    -- 清理完成标记：后台清理 worker（internal/cleanup）完成 Agent 运行态卸载、聊天记录软删除后写入，
+    -- deleted_at IS NOT NULL AND cleaned_at IS NULL 即“待清理”队列。
+    cleaned_at    BIGINT
 );
 
 CREATE TABLE IF NOT EXISTS agents (
@@ -61,11 +66,16 @@ CREATE TABLE IF NOT EXISTS agents (
     -- 仅 kind = 'AGENT_KIND_A2A' 时非空，承载对外部 A2A Agent 的接入配置
     -- （endpoint_url / auth_scheme / auth_token）与只读展示信息
     -- （remote_agent_name / remote_description / remote_skills / streaming）。
-    a2a_config JSONB
+    a2a_config JSONB,
+    -- 软删除：随团队软删除一起写入（Unix 秒），所有读取均过滤 deleted_at IS NULL。
+    deleted_at BIGINT
 );
 
 CREATE INDEX IF NOT EXISTS idx_agents_team_id ON agents (team_id);
 CREATE INDEX IF NOT EXISTS idx_teams_created_at ON teams (created_at);
+-- 部分索引：只覆盖“已软删除、待清理”的团队，供清理 worker 轮询。
+CREATE INDEX IF NOT EXISTS idx_teams_pending_cleanup ON teams (deleted_at)
+    WHERE deleted_at IS NOT NULL AND cleaned_at IS NULL;
 
 -- 自定义 MCP 工具：按团队隔离，仅对归属团队的 Agent 可见可选（与内置静态清单
 -- internal/options.MCPTools() 合并后一起展示），不同团队互不可见。
@@ -81,9 +91,14 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
     timeout_seconds INTEGER NOT NULL DEFAULT 30,
     created_at      BIGINT NOT NULL,
     updated_at      BIGINT NOT NULL,
-    -- 一个团队下同一个 base_url 只能被引入一次（后端据此约束名区分 id 冲突与 base_url 重复）。
-    CONSTRAINT uq_mcp_tools_team_base_url UNIQUE (team_id, base_url)
+    -- 软删除：随团队软删除一起写入（Unix 秒），所有读取均过滤 deleted_at IS NULL。
+    deleted_at      BIGINT
 );
+
+-- 一个团队下同一个 base_url 只能被引入一次（后端据此索引名区分 id 冲突与 base_url 重复）。
+-- 部分唯一索引：只约束未软删除的行，软删除后同一团队可用相同 base_url 重新接入。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mcp_tools_team_base_url
+    ON mcp_tools (team_id, base_url) WHERE deleted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_team_id ON mcp_tools (team_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_created_at ON mcp_tools (created_at);

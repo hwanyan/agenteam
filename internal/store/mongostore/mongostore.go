@@ -8,6 +8,7 @@ package mongostore
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -27,6 +28,8 @@ type Store struct {
 // messageDoc 是聊天记录在 MongoDB 中的文档结构。
 // reasoning / tool_calls 是后加的可选字段：历史文档里没有它们，读取时按零值处理即可，
 // 无需做数据迁移（这正是聊天记录选用文档库的原因）。
+// 软删除字段 deleted_at 只通过 SoftDeleteByTeam 写入、读取时在查询条件里过滤，
+// 不需要出现在这个结构体中。
 type messageDoc struct {
 	ID        string        `bson:"id"`
 	TeamID    string        `bson:"team_id"`
@@ -125,7 +128,7 @@ func (s *Store) AppendMessage(ctx context.Context, msg *agenteamv1.ChatMessage) 
 // ListMessages 返回指定团队的历史聊天记录，按时间升序排列。
 func (s *Store) ListMessages(ctx context.Context, teamID string) ([]*agenteamv1.ChatMessage, error) {
 	cur, err := s.coll.Find(ctx,
-		bson.M{"team_id": teamID},
+		bson.M{"team_id": teamID, "deleted_at": nil}, // nil 同时匹配字段缺失与 null，历史文档无需迁移
 		options.Find().SetSort(bson.D{{Key: "created_at", Value: 1}}),
 	)
 	if err != nil {
@@ -156,10 +159,18 @@ func (s *Store) ListMessages(ctx context.Context, teamID string) ([]*agenteamv1.
 	return out, nil
 }
 
-// DeleteByTeam 删除指定团队的全部聊天记录。
-func (s *Store) DeleteByTeam(ctx context.Context, teamID string) error {
-	if _, err := s.coll.DeleteMany(ctx, bson.M{"team_id": teamID}); err != nil {
-		return fmt.Errorf("mongostore: delete messages: %w", err)
+// SoftDeleteByTeam 软删除指定团队的全部聊天记录：只写 deleted_at，不物理删除。
+//
+// 幂等：只更新尚未软删除的文档（deleted_at 为 null 或缺失），重复调用不会覆盖首次删除时间，
+// 因此清理 worker 失败重试、多实例并发执行都是安全的。
+// deleted_at 使用 BSON Date 类型，将来如需按保留期物理清理，可直接在该字段上建 TTL 索引。
+func (s *Store) SoftDeleteByTeam(ctx context.Context, teamID string) error {
+	_, err := s.coll.UpdateMany(ctx,
+		bson.M{"team_id": teamID, "deleted_at": nil},
+		bson.M{"$set": bson.M{"deleted_at": time.Now()}},
+	)
+	if err != nil {
+		return fmt.Errorf("mongostore: soft delete messages: %w", err)
 	}
 	return nil
 }
