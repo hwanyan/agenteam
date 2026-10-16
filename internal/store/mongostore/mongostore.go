@@ -17,6 +17,7 @@ import (
 	agenteamv1 "github.com/hwanyan/agenteam/pb/gen"
 )
 
+// 对话集合名称（Collection 的名称）
 const collectionName = "chat_messages"
 
 // Store 是 store.MessageStore 的 MongoDB 实现。

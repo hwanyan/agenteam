@@ -32,7 +32,7 @@ var ErrMcpToolBaseURLTaken = errors.New("mcp tool base_url already exists in tea
 
 // Store 是业务层依赖的统一存储接口。
 type Store interface {
-	// CreateTeam 原子性地创建团队及其主 Agent（两者互相引用，需保证一致性）。
+	// CreateTeam 原子性地创建团队（同时会自动创建其对应的主 Agent，两者互相引用，需保证一致性）。
 	CreateTeam(ctx context.Context, team *pb.Team, mainAgent *pb.Agent) error
 	// GetTeam 按 id 查询团队。
 	GetTeam(ctx context.Context, id string) (*pb.Team, error)
@@ -54,10 +54,9 @@ type Store interface {
 	ListAgentsByTeam(ctx context.Context, teamID string) ([]*pb.Agent, error)
 	// DeleteAgent 删除一个非主 Agent；若目标是主 Agent 则返回 ErrMainAgentProtected。
 	DeleteAgent(ctx context.Context, id string) error
-	// CreateMcpTool 在指定团队下接入一个自定义 MCP 工具；tool.Id 必须由调用方
-	// （internal/service，通过 internal/tools.NewMCPToolID）预先生成好。apiKey 为明文，
-	// 仅落库使用，任何查询接口都不会回显（对应 tool.ApiKeySet 只读标记）。若 id 与已存在的
-	// 自定义工具冲突，返回 ErrAlreadyExists。
+	// CreateMcpTool 在指定团队下接入一个自定义 MCP 工具
+	// apiKey 为明文，仅落库使用，任何查询接口都不会回显（对应 tool.ApiKeySet 只读标记）。
+	// 若 id 与已存在的自定义工具冲突，返回 ErrAlreadyExists。
 	CreateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey string) error
 	// ListMcpToolsByTeam 返回指定团队下已接入的全部自定义 MCP 工具（不含
 	// internal/options 提供的平台内置静态清单），按创建时间升序排列。
@@ -80,8 +79,8 @@ type Store interface {
 	ListMessages(ctx context.Context, teamID string) ([]*pb.ChatMessage, error)
 }
 
-// TeamAgentStore 是 Store 中“团队 / Agent / 自定义 MCP 工具”相关能力的子接口，由 PostgreSQL 实现。
-type TeamAgentStore interface {
+// TeamStore 是 Store 中“团队 / Agent / 自定义 MCP 工具”相关能力的子接口，由 PostgreSQL 实现。
+type TeamStore interface {
 	CreateTeam(ctx context.Context, team *pb.Team, mainAgent *pb.Agent) error
 	GetTeam(ctx context.Context, id string) (*pb.Team, error)
 	ListTeams(ctx context.Context) ([]*pb.Team, error)
@@ -120,12 +119,12 @@ type DeletedTeam struct {
 // composite 将“关系型库(Team/Agent)”与“文档库(ChatMessage)”组合为统一的 Store，
 // 对跨库操作（如删除团队需要同时清理聊天记录）做协调。
 type composite struct {
-	teams    TeamAgentStore
+	teams    TeamStore
 	messages MessageStore
 }
 
 // New 组合 PostgreSQL 与 MongoDB 两个子存储，构建统一的 Store。
-func New(teams TeamAgentStore, messages MessageStore) Store {
+func New(teams TeamStore, messages MessageStore) Store {
 	return &composite{teams: teams, messages: messages}
 }
 
@@ -179,14 +178,6 @@ func (c *composite) DeleteAgent(ctx context.Context, id string) error {
 	return c.teams.DeleteAgent(ctx, id)
 }
 
-func (c *composite) AppendMessage(ctx context.Context, msg *pb.ChatMessage) error {
-	return c.messages.AppendMessage(ctx, msg)
-}
-
-func (c *composite) ListMessages(ctx context.Context, teamID string) ([]*pb.ChatMessage, error) {
-	return c.messages.ListMessages(ctx, teamID)
-}
-
 func (c *composite) CreateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey string) error {
 	return c.teams.CreateMcpTool(ctx, tool, apiKey)
 }
@@ -205,4 +196,12 @@ func (c *composite) UpdateMcpTool(ctx context.Context, tool *pb.McpTool, apiKey 
 
 func (c *composite) DeleteMcpTool(ctx context.Context, id string) ([]string, error) {
 	return c.teams.DeleteMcpTool(ctx, id)
+}
+
+func (c *composite) AppendMessage(ctx context.Context, msg *pb.ChatMessage) error {
+	return c.messages.AppendMessage(ctx, msg)
+}
+
+func (c *composite) ListMessages(ctx context.Context, teamID string) ([]*pb.ChatMessage, error) {
+	return c.messages.ListMessages(ctx, teamID)
 }

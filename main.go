@@ -1,11 +1,3 @@
-// Package main 启动 Agent Runtime 平台的后端服务：
-//   - :9090 gRPC 服务
-//   - :8080 HTTP（grpc-gateway，供前端以 REST/JSON 调用）
-//
-// 数据存储按数据形态拆分到三种数据库（详见 scripts/README.md）：
-//   - PostgreSQL：teams / agents（关系型配置数据）
-//   - MongoDB：chat_messages（聊天记录，文档型）
-//   - Redis：Agent 运行态热缓存（KV）
 package main
 
 import (
