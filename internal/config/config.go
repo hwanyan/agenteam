@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 )
 
 // Config 应用配置，全部来自环境变量（敏感信息仅从环境读取，不接受任何用户输入覆盖）。
@@ -23,6 +24,11 @@ type Config struct {
 	// internal/llm 会降级为本地 Echo 客户端，无需任何密钥即可跑通整套流程。
 	DeepSeekAPIKey  string
 	DeepSeekBaseURL string
+
+	// 鉴权：HTTP 网关要求请求携带 `Authorization: Bearer <token>`。
+	// AuthTokens 为合法 token 列表（逗号分隔，便于轮换时新旧并存）。
+	// 未配置任何 token 时服务拒绝启动（见 main.go）。
+	AuthTokens []string
 }
 
 func getenv(key, def string) string {
@@ -32,10 +38,23 @@ func getenv(key, def string) string {
 	return def
 }
 
+// splitCSV 按逗号拆分并去除空白与空项。
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // Load 从环境变量加载配置，提供合理默认值便于本地开发。
 // 数据库连接串/密码/密钥等敏感信息只允许通过环境变量注入。
 func Load() *Config {
 	return &Config{
+		AuthTokens: splitCSV(os.Getenv("AGENTEAM_AUTH_TOKENS")),
+
 		HTTPAddr: getenv("AGENTEAM_HTTP_ADDR", ":8080"),
 		GRPCAddr: getenv("AGENTEAM_GRPC_ADDR", "127.0.0.1:9090"),
 

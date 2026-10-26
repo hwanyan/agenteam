@@ -117,6 +117,7 @@ bash pb/gen-proto.sh
 export AGENTEAM_POSTGRES_DSN="postgres://localhost:5432/agenteam?sslmode=disable"
 export AGENTEAM_REDIS_DSN="redis://127.0.0.1:6379/0"
 export AGENTEAM_MONGO_URI="mongodb://127.0.0.1:27017"
+export AGENTEAM_AUTH_TOKENS="dev-token"   # 必填，前端登录页输入同一个值
 go run .
 ```
 
@@ -138,8 +139,21 @@ go run .
 | `AGENTEAM_MONGO_DATABASE` | MongoDB 数据库名 | `agenteam` |
 | `DEEPSEEK_API_KEY` | DeepSeek 平台 API Key（[申请地址](https://platform.deepseek.com/api_keys)；未设置时使用本地 Echo 客户端，无需任何密钥即可跑通全流程） | 空 |
 | `DEEPSEEK_BASE_URL` | 可选，自定义 DeepSeek API Base URL | `https://api.deepseek.com/` |
+| `AGENTEAM_AUTH_TOKENS` | **必填**。HTTP 网关访问 token，逗号分隔（支持新旧并存以便轮换）。请求须带 `Authorization: Bearer <token>`。未设置时服务拒绝启动 | 无 |
 
 所有数据库连接串/密码/密钥均只允许通过环境变量注入，不接受任何用户请求动态指定。
+
+生成 token 示例：`openssl rand -hex 32`。鉴权实现见 `internal/httpmiddleware`；
+gRPC 端口（默认 `127.0.0.1:9090`）本身不做鉴权，请保持仅监听 loopback。
+
+### 关于 CORS
+
+后端**不处理 CORS**，要求前端与 API 对浏览器而言始终同源：
+
+- 生产：前端静态资源与 API 经 nginx 挂在同一域名下（`/agenteam/` 与 `/api/agenteam/`）。
+- 本地开发：前端 dev server（vite）通过 `proxy` 把 `/v1` 转发到后端，浏览器只访问 `localhost:5173`。
+
+若将来需要让其他域名的前端/第三方直接跨源调用，再引入基于精确来源白名单的 CORS 中间件。
 
 ## 已知限制 / 后续可演进方向
 

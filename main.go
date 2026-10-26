@@ -18,6 +18,7 @@ import (
 	"github.com/hwanyan/agenteam/internal/cache"
 	"github.com/hwanyan/agenteam/internal/cleanup"
 	"github.com/hwanyan/agenteam/internal/config"
+	"github.com/hwanyan/agenteam/internal/httpmiddleware"
 	"github.com/hwanyan/agenteam/internal/llm"
 	"github.com/hwanyan/agenteam/internal/store"
 	"github.com/hwanyan/agenteam/internal/store/mongostore"
@@ -30,6 +31,11 @@ import (
 
 func main() {
 	cfg := config.Load()
+
+	// 鉴权为必选项：未配置 token 时拒绝启动，避免无意中裸奔。
+	if len(cfg.AuthTokens) == 0 {
+		log.Fatalf("未配置 AGENTEAM_AUTH_TOKENS：请设置至少一个访问 token（逗号分隔，可用 openssl rand -hex 32 生成）")
+	}
 
 	connectCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -119,24 +125,11 @@ func main() {
 		log.Fatalf("register workspace gateway: %v", err)
 	}
 
+	// 前端与 API 同源访问（生产经 nginx 反代，开发经 vite proxy），因此不处理 CORS，仅做 token 鉴权。
 	log.Printf("HTTP gateway listening on %s", cfg.HTTPAddr)
-	if err := http.ListenAndServe(cfg.HTTPAddr, withCORS(mux)); err != nil {
+	if err := http.ListenAndServe(cfg.HTTPAddr, httpmiddleware.Auth(cfg.AuthTokens, mux)); err != nil {
 		log.Fatalf("serve http gateway: %v", err)
 	}
-}
-
-// withCORS 允许本地前端开发服务器跨域调用后端 REST 接口。
-func withCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 // dialTarget 将 gRPC 监听地址转换为可供客户端拨号的目标地址：
