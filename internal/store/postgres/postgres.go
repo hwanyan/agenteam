@@ -26,7 +26,7 @@ import (
 	agenteamv1 "github.com/hwanyan/agenteam/pb/gen"
 )
 
-// Store 是 store.TeamAgentStore 的 PostgreSQL 实现。
+// Store 是 store.TeamStore 的 PostgreSQL 实现。
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -274,7 +274,7 @@ func (s *Store) SaveAgent(ctx context.Context, agent *agenteamv1.Agent) error {
 			a2a_config = EXCLUDED.a2a_config
 		WHERE agents.deleted_at IS NULL
 	`,
-	agent.Id, agent.TeamId, agent.Name, agent.Prompt, agent.Model,
+		agent.Id, agent.TeamId, agent.Name, agent.Prompt, agent.Model,
 		mcpTools, skills, agent.IsMain, agent.Version, agent.Status.String(),
 		agent.CreatedAt, agent.UpdatedAt, agentKindDBValue(agent.Kind), a2aDoc,
 	)

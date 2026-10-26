@@ -86,7 +86,6 @@ type TeamStore interface {
 	ListTeams(ctx context.Context) ([]*pb.Team, error)
 	// SoftDeleteTeam 仅软删除关系型库中的团队与其 Agent（不涉及聊天记录），不存在或已删除返回 ErrNotFound。
 	SoftDeleteTeam(ctx context.Context, id string) error
-	// ListDeletedTeamsPendingCleanup 返回已软删除、尚未完成清理的团队及其全部 Agent id。
 	ListDeletedTeamsPendingCleanup(ctx context.Context, limit int) ([]*DeletedTeam, error)
 	// MarkTeamCleaned 标记团队清理完成（幂等）。
 	MarkTeamCleaned(ctx context.Context, id string) error
