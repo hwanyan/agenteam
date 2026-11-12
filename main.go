@@ -15,9 +15,11 @@ import (
 	gwruntime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 
 	"github.com/hwanyan/agenteam/internal/a2a"
+	"github.com/hwanyan/agenteam/internal/authclient"
 	"github.com/hwanyan/agenteam/internal/cache"
 	"github.com/hwanyan/agenteam/internal/cleanup"
 	"github.com/hwanyan/agenteam/internal/config"
+	"github.com/hwanyan/agenteam/internal/httpauth"
 	"github.com/hwanyan/agenteam/internal/httpmiddleware"
 	"github.com/hwanyan/agenteam/internal/llm"
 	"github.com/hwanyan/agenteam/internal/store"
@@ -32,11 +34,12 @@ import (
 func main() {
 	cfg := config.Load()
 
-	// 鉴权为必选项：未配置 token 时拒绝启动，避免无意中裸奔。
-	if len(cfg.AuthTokens) == 0 {
-		log.Fatalf("未配置 AGENTEAM_AUTH_TOKENS：请设置至少一个访问 token（逗号分隔，可用 openssl rand -hex 32 生成）")
+	// 鉴权为必选项：用户注册 / 登录 / Token 校验全部由 hwan 认证服务（仅 gRPC）提供，
+	// 地址与调用方凭证缺一不可，否则拒绝启动，避免无意中裸奔。
+	if cfg.AuthServiceAddr == "" || cfg.AuthServiceToken == "" {
+		log.Fatalf("未配置鉴权：请设置 AGENTEAM_AUTH_SERVICE_ADDR（hwan 认证服务 gRPC 地址）" +
+			"和 AGENTEAM_AUTH_SERVICE_TOKEN（调用方凭证，须与认证服务 server.services 里 name 为 agenteam 那一项的 token 一致）")
 	}
-
 	connectCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -67,6 +70,14 @@ func main() {
 	}
 	defer agentCache.Close()
 	log.Printf("connected to Redis")
+
+	// 认证服务客户端：Access Token 在本地验签，不查库、不查 Redis
+	authClient, err := authclient.New(cfg.AuthServiceAddr, cfg.AuthServiceToken)
+	if err != nil {
+		log.Fatalf("init auth service client: %v", err)
+	}
+	defer authClient.Close()
+	log.Printf("auth enabled via hwan auth service at %s", cfg.AuthServiceAddr)
 
 	st := store.New(pgStore, msgStore)
 	deps := &service.Deps{
@@ -125,9 +136,19 @@ func main() {
 		log.Fatalf("register workspace gateway: %v", err)
 	}
 
-	// 前端与 API 同源访问（生产经 nginx 反代，开发经 vite proxy），因此不处理 CORS，仅做 token 鉴权。
+	// 路由分两层：
+	//   - /v1/auth:*：登录、注册、发验证码、刷新、登出，由 httpauth 代理到 hwan 认证服务，不经过 Bearer 鉴权（登录前没有 token）；
+	//   - 其余所有路径：先过 Bearer 鉴权，再进入 grpc-gateway。
+	// 前端与 API 同源访问（生产经 nginx 反代，开发经 vite proxy），因此不处理 CORS。
+	root := http.NewServeMux()
+	authHandler := httpauth.New(authClient)
+	for _, p := range httpauth.Paths {
+		root.Handle(p, authHandler)
+	}
+	root.Handle("/", httpmiddleware.Auth(authClient, mux))
+
 	log.Printf("HTTP gateway listening on %s", cfg.HTTPAddr)
-	if err := http.ListenAndServe(cfg.HTTPAddr, httpmiddleware.Auth(cfg.AuthTokens, mux)); err != nil {
+	if err := http.ListenAndServe(cfg.HTTPAddr, root); err != nil {
 		log.Fatalf("serve http gateway: %v", err)
 	}
 }

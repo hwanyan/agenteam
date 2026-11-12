@@ -117,7 +117,8 @@ bash pb/gen-proto.sh
 export AGENTEAM_POSTGRES_DSN="postgres://localhost:5432/agenteam?sslmode=disable"
 export AGENTEAM_REDIS_DSN="redis://127.0.0.1:6379/0"
 export AGENTEAM_MONGO_URI="mongodb://127.0.0.1:27017"
-export AGENTEAM_AUTH_TOKENS="dev-token"   # 必填，前端登录页输入同一个值
+export AGENTEAM_AUTH_SERVICE_ADDR="127.0.0.1:50054"   # hwan 认证服务 gRPC 地址（必填）
+export AGENTEAM_AUTH_SERVICE_TOKEN="<调用方凭证>"       # 须与 hwan auth 的 server.services 里 name 为 agenteam 那一项的 token 一致（必填）
 go run .
 ```
 
@@ -139,12 +140,51 @@ go run .
 | `AGENTEAM_MONGO_DATABASE` | MongoDB 数据库名 | `agenteam` |
 | `DEEPSEEK_API_KEY` | DeepSeek 平台 API Key（[申请地址](https://platform.deepseek.com/api_keys)；未设置时使用本地 Echo 客户端，无需任何密钥即可跑通全流程） | 空 |
 | `DEEPSEEK_BASE_URL` | 可选，自定义 DeepSeek API Base URL | `https://api.deepseek.com/` |
-| `AGENTEAM_AUTH_TOKENS` | **必填**。HTTP 网关访问 token，逗号分隔（支持新旧并存以便轮换）。请求须带 `Authorization: Bearer <token>`。未设置时服务拒绝启动 | 无 |
+| `AGENTEAM_AUTH_SERVICE_ADDR` | hwan 认证服务（`hwan/app/auth`）的 gRPC 地址。**必填**，未设置时服务拒绝启动 | 无 |
+| `AGENTEAM_AUTH_SERVICE_TOKEN` | 调用认证服务所用的调用方凭证，须与认证服务 `server.services` 里 `name: agenteam` 那一项的 `token` 一致（可用 `openssl rand -hex 32` 生成）。**必填**，未设置时服务拒绝启动 | 无 |
 
 所有数据库连接串/密码/密钥均只允许通过环境变量注入，不接受任何用户请求动态指定。
 
-生成 token 示例：`openssl rand -hex 32`。鉴权实现见 `internal/httpmiddleware`；
+### 鉴权（用户系统由 hwan 统一提供）
+
+已移除原先的静态 token（`AGENTEAM_AUTH_TOKENS` / 前端 `VITE_AUTH_TOKEN`）。现在所有访问都必须使用**用户登录后获得的 token**。
+
+hwan 认证服务只提供 gRPC，因此 agenteam 作为代理对前端暴露登录 / 注册接口（`internal/httpauth`）：
+
+| 接口 | 是否需要 Bearer token | 说明 |
+| --- | --- | --- |
+| `POST /v1/auth:sendVerifyCode` | 否 | `{email, purpose}`，发送邮箱验证码 |
+| `POST /v1/auth:register` | 否 | `{username, email, password, nickname?, verifyCode}`，返回 `{token, refreshToken, expiresIn, user}` |
+| `POST /v1/auth:login` | 否 | `{username, password}`（用户名或邮箱），返回同上 |
+| `POST /v1/auth:refresh` | 否 | `{refreshToken}`，换取新的 `token` + 新的 `refreshToken`（轮换，旧的立即作废）。此时 Access Token 通常已过期，身份由 Refresh Token 证明 |
+| `POST /v1/auth:logout` | 携带 Bearer（允许已过期） | 吊销当前登录链路，其 Refresh Token 全部失效 |
+| 其余所有 `/v1/*` | 是 | `Authorization: Bearer <Access Token>`，**本地验签**，用户身份与平台角色可通过 `httpmiddleware.UserFromContext(ctx)` 读取（`UserID` / `Username` / `Roles`） |
+
+两层凭证互不混用：
+
+- **调用方凭证**（`AGENTEAM_AUTH_SERVICE_TOKEN`）：agenteam 调用 hwan 认证服务时随每个 gRPC 请求以 `authorization: Bearer ...` 携带，证明「调用者是 agenteam」。
+- **用户令牌**：终端用户登录后获得。Access Token（短寿命 JWT，默认 15 分钟）放在 `Authorization` 头；Refresh Token 仅用于 `/v1/auth:refresh`。
+
+**本地验签**：agenteam 启动后首次校验时通过 `AuthService.GetJWKS` 取得 auth 服务的公钥并缓存（10 分钟刷新，遇到未知 `kid` 立即刷新），之后每个业务请求都在本进程内完成验签（签名、`exp`、`iss`、`aud`），
+**不再回源 auth 服务、不查库**。agenteam 只持有公钥，无法伪造 Token。验签代码来自独立的公共库 `github.com/hwanyan/authkit/verifier`（与 auth 服务共用同一份解析规则）。
+
+**登出只吊销 Refresh Token**：用户登出时，agenteam 把 Access Token 交给 auth（`AuthService.Logout`），auth 吊销该登录链路下的全部 Refresh Token，之后无法再续期。
+agenteam 本地**没有「已登出名单」**，也不为此依赖 Redis：已签发的 Access Token 在自然过期前（最长 `access_ttl`，默认 15 分钟）仍能通过本地验签——这是纯 JWT 方案有意接受的取舍。
+
+账号被禁用、降权、登出对**已签发的 Access Token** 都最多滞后 `access_ttl` 生效（之后无法再刷新）。需要即时结论的敏感操作请用 `authclient.VerifyTokenStrict`（会额外回源确认账号状态）。
+
+失败时的 HTTP 状态码：
+
+| 情形 | 状态码 |
+| --- | --- |
+| 缺少 / 格式错误 / Access Token 无效或已过期（前端应先 `/v1/auth:refresh`，失败再重新登录） | `401` |
+| 账号已被禁用（`/v1/auth:refresh` 或强校验时） | `403` |
+| 取不到验签公钥（认证服务不可达且尚无缓存）；**调用方凭证被认证服务拒绝**（部署配置错误） | `503`（带 `Retry-After`；刻意不用 401，避免服务抖动或配置错误时把所有用户踢下线，配置错误会写 ERROR 日志） |
+
+认证服务客户端见 `internal/authclient`，鉴权中间件见 `internal/httpmiddleware`。
 gRPC 端口（默认 `127.0.0.1:9090`）本身不做鉴权，请保持仅监听 loopback。
+
+> **待办：服务间通道加固。** 当前是「静态服务凭证 + 明文 gRPC」，仅适合同一内网。后续应升级为 mTLS（或至少为 auth 的 gRPC 端口启用 TLS），避免调用方凭证被窃听。详见 `hwan/app/auth/README.md`。
 
 ### 关于 CORS
 
@@ -169,4 +209,6 @@ gRPC 端口（默认 `127.0.0.1:9090`）本身不做鉴权，请保持仅监听 
 - `DeleteTeam` 跨 PostgreSQL / MongoDB 两个数据库操作，非分布式事务，
   采用“先删关系型主数据、再清理聊天记录”的最终一致性策略：极端情况下
   可能残留孤立的聊天记录，但不影响团队/Agent 数据一致性。
-- 未接入鉴权/多租户，`internal/service` 中的 gRPC handler 目前对所有请求一视同仁。
+- 已接入 hwan 用户系统做**登录态鉴权**，但尚未做**数据归属隔离**：teams / agents 表还没有 owner（user_id）字段，
+  `internal/service` 中的 handler 虽能通过 `UserFromContext` 拿到当前用户，目前仍对所有已认证用户一视同仁。
+  如需多租户隔离，需要后续为表加 owner 并在各 handler 中按用户过滤。
