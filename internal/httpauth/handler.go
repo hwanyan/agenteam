@@ -91,6 +91,9 @@ type userJSON struct {
 	Email     string `json:"email"`
 	Nickname  string `json:"nickname"`
 	AvatarURL string `json:"avatarUrl"`
+	// Role 平台级角色（user / admin）。仅供前端决定是否展示“全部团队”等管理员入口；
+	// 真正的授权始终由后端按 Access Token 里的 roles 判断，不依赖前端。
+	Role string `json:"role"`
 }
 
 type refreshReq struct {
@@ -225,6 +228,7 @@ func toAuthResp(r *authpb.AuthResponse) authResp {
 			Email:     u.GetEmail(),
 			Nickname:  u.GetNickname(),
 			AvatarURL: u.GetAvatarUrl(),
+			Role:      u.GetRole(),
 		},
 	}
 }

@@ -28,7 +28,7 @@ func NewTeamServer(deps *Deps) *TeamServer {
 	return &TeamServer{Deps: deps}
 }
 
-// CreateTeam 创建团队，并自动创建、加载该团队的主 Agent。
+// CreateTeam 创建团队，并自动创建、加载该团队的主 Agent；创建者自动成为该团队的 owner。
 //
 // 主 Agent 的创建方式由 req.Kind 决定（未指定时按 AGENT_KIND_PROMPT 处理，兼容旧客户端
 // 只传 name 的用法）：
@@ -36,6 +36,10 @@ func NewTeamServer(deps *Deps) *TeamServer {
 //   - AGENT_KIND_A2A：主 Agent 直接链接一个外部 A2A Agent 提供方，与 AgentServer.CreateAgent
 //     对 A2A 方式的校验逻辑保持一致（至少需要 a2a_config.endpoint_url）。
 func (s *TeamServer) CreateTeam(ctx context.Context, req *agenteamv1.CreateTeamRequest) (*agenteamv1.CreateTeamResponse, error) {
+	user, err := s.currentUser(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if req.Name == "" {
 		return nil, status.Error(codes.InvalidArgument, "团队名称不能为空")
 	}
@@ -87,7 +91,7 @@ func (s *TeamServer) CreateTeam(ctx context.Context, req *agenteamv1.CreateTeamR
 		agent.Skills = append([]string{}, req.Skills...)
 	}
 
-	agent, err := s.Runtime.Load(ctx, agent)
+	agent, err = s.Runtime.Load(ctx, agent)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "初始化主 Agent 失败: %v", err)
 	}
@@ -99,34 +103,62 @@ func (s *TeamServer) CreateTeam(ctx context.Context, req *agenteamv1.CreateTeamR
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if err := s.Store.CreateTeam(ctx, team, agent); err != nil {
+	if err := s.Store.CreateTeam(ctx, team, agent, user.UserID); err != nil {
 		return nil, status.Errorf(codes.Internal, "创建团队失败: %v", err)
 	}
+	team.MyRole = agenteamv1.TeamRole_TEAM_ROLE_OWNER
 
 	return &agenteamv1.CreateTeamResponse{Team: team, MainAgent: redactAgent(agent)}, nil
 }
 
-// ListTeams 返回全部团队。
-func (s *TeamServer) ListTeams(ctx context.Context, _ *agenteamv1.ListTeamsRequest) (*agenteamv1.ListTeamsResponse, error) {
-	teams, err := s.Store.ListTeams(ctx)
+// ListTeams 返回当前用户所在的团队。req.All=true 仅平台管理员可用，返回平台内全部团队。
+func (s *TeamServer) ListTeams(ctx context.Context, req *agenteamv1.ListTeamsRequest) (*agenteamv1.ListTeamsResponse, error) {
+	user, err := s.currentUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.All {
+		if !isPlatformAdmin(user) {
+			return nil, status.Error(codes.PermissionDenied, "仅平台管理员可查看全部团队")
+		}
+		teams, err := s.Store.ListTeams(ctx)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "查询团队列表失败: %v", err)
+		}
+		for _, t := range teams {
+			t.MyRole = agenteamv1.TeamRole_TEAM_ROLE_OWNER // 管理员越过成员校验，按 owner 对待
+		}
+		return &agenteamv1.ListTeamsResponse{Teams: teams}, nil
+	}
+
+	teams, err := s.Store.ListTeamsByUser(ctx, user.UserID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "查询团队列表失败: %v", err)
 	}
 	return &agenteamv1.ListTeamsResponse{Teams: teams}, nil
 }
 
-// GetTeam 按 id 查询团队。
+// GetTeam 按 id 查询团队（团队成员可见）。
 func (s *TeamServer) GetTeam(ctx context.Context, req *agenteamv1.GetTeamRequest) (*agenteamv1.GetTeamResponse, error) {
+	_, role, err := s.authorizeTeam(ctx, req.Id, agenteamv1.TeamRole_TEAM_ROLE_MEMBER)
+	if err != nil {
+		return nil, err
+	}
 	team, err := s.Store.GetTeam(ctx, req.Id)
 	if err != nil {
 		return nil, teamNotFoundOrErr(err)
 	}
+	team.MyRole = role
 	return &agenteamv1.GetTeamResponse{Team: team}, nil
 }
 
-// DeleteTeam 软删除团队及其全部 Agent（PG 单事务，成功即对外不可见）。
+// DeleteTeam 软删除团队及其全部 Agent（PG 单事务，成功即对外不可见）；仅团队 owner 可操作。
 // 聊天记录软删除与各 Agent 运行态缓存卸载由后台清理 worker（internal/cleanup）异步完成。
 func (s *TeamServer) DeleteTeam(ctx context.Context, req *agenteamv1.DeleteTeamRequest) (*agenteamv1.DeleteTeamResponse, error) {
+	if _, _, err := s.authorizeTeam(ctx, req.Id, agenteamv1.TeamRole_TEAM_ROLE_OWNER); err != nil {
+		return nil, err
+	}
 	team, err := s.Store.GetTeam(ctx, req.Id)
 	if err != nil {
 		return nil, teamNotFoundOrErr(err)

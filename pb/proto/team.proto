@@ -7,8 +7,13 @@ import "common.proto";
 
 option go_package = "github.com/hwanyan/agenteam/pb/gen/;agenteamv1";
 
-// TeamService 负责团队的创建、查询与删除。
-// 创建团队时会自动创建团队的主 Agent。
+// TeamService 负责团队的创建、查询与删除，以及团队成员管理。
+// 创建团队时会自动创建团队的主 Agent，并把创建者设为该团队的 owner。
+//
+// 授权规则（团队级角色见 TeamRole，平台管理员 admin 可越过成员校验）：
+//   - 非成员访问团队资源一律按“不存在”处理（NotFound），不暴露团队是否存在；
+//   - 成员（member）：只读，并可在工作区对话；
+//   - 所有者（owner）：增删改 Agent / MCP 工具、管理成员、删除团队。
 service TeamService {
   rpc CreateTeam(CreateTeamRequest) returns (CreateTeamResponse) {
     option (google.api.http) = {
@@ -17,6 +22,7 @@ service TeamService {
     };
   }
 
+  // ListTeams 默认只返回当前用户所在的团队；all=true 仅平台管理员可用，返回全部团队。
   rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse) {
     option (google.api.http) = {
       get: "/v1/teams"
@@ -32,6 +38,38 @@ service TeamService {
   rpc DeleteTeam(DeleteTeamRequest) returns (DeleteTeamResponse) {
     option (google.api.http) = {
       delete: "/v1/teams/{id}"
+    };
+  }
+
+  // ListTeamMembers 返回团队成员列表（owner 在前，其余按加入时间升序）。团队成员可见。
+  rpc ListTeamMembers(ListTeamMembersRequest) returns (ListTeamMembersResponse) {
+    option (google.api.http) = {
+      get: "/v1/teams/{team_id}/members"
+    };
+  }
+
+  // AddTeamMember 邀请用户加入团队（直接加入，无需对方确认）。仅 owner 可用。
+  // 被邀请人按用户名指定，且必须已登录过本平台（本平台据此才能把用户名对应到用户 id）。
+  rpc AddTeamMember(AddTeamMemberRequest) returns (AddTeamMemberResponse) {
+    option (google.api.http) = {
+      post: "/v1/teams/{team_id}/members"
+      body: "*"
+    };
+  }
+
+  // UpdateTeamMemberRole 修改成员角色。仅 owner 可用；不允许把团队最后一个 owner 降级。
+  rpc UpdateTeamMemberRole(UpdateTeamMemberRoleRequest) returns (UpdateTeamMemberRoleResponse) {
+    option (google.api.http) = {
+      put: "/v1/teams/{team_id}/members/{user_id}"
+      body: "*"
+    };
+  }
+
+  // RemoveTeamMember 移除成员。owner 可移除任何人；任何成员都可以移除自己（退出团队）。
+  // 不允许移除团队最后一个 owner。
+  rpc RemoveTeamMember(RemoveTeamMemberRequest) returns (RemoveTeamMemberResponse) {
+    option (google.api.http) = {
+      delete: "/v1/teams/{team_id}/members/{user_id}"
     };
   }
 }
@@ -57,7 +95,10 @@ message CreateTeamResponse {
   Agent main_agent = 2;
 }
 
-message ListTeamsRequest {}
+message ListTeamsRequest {
+  // 仅平台管理员可设为 true：返回平台内全部团队而不是“我所在的团队”；非管理员设置会得到 PermissionDenied。
+  bool all = 1;
+}
 
 message ListTeamsResponse {
   repeated Team teams = 1;
@@ -76,3 +117,47 @@ message DeleteTeamRequest {
 }
 
 message DeleteTeamResponse {}
+
+// 团队成员。
+message TeamMember {
+  string user_id = 1;
+  // 用户名，来自本平台记录的登录用户信息；该用户尚无记录时为空，前端可回退展示 user_id。
+  string username = 2;
+  TeamRole role = 3;
+  int64 created_at = 4; // 加入团队的时间
+}
+
+message ListTeamMembersRequest {
+  string team_id = 1;
+}
+
+message ListTeamMembersResponse {
+  repeated TeamMember members = 1;
+}
+
+message AddTeamMemberRequest {
+  string team_id = 1;
+  string username = 2;  // 被邀请人的用户名（精确匹配，不区分大小写）
+  TeamRole role = 3;    // 留空（TEAM_ROLE_UNSPECIFIED）时按 TEAM_ROLE_MEMBER 处理
+}
+
+message AddTeamMemberResponse {
+  TeamMember member = 1;
+}
+
+message UpdateTeamMemberRoleRequest {
+  string team_id = 1;
+  string user_id = 2;
+  TeamRole role = 3;    // 必填，不能为 TEAM_ROLE_UNSPECIFIED
+}
+
+message UpdateTeamMemberRoleResponse {
+  TeamMember member = 1;
+}
+
+message RemoveTeamMemberRequest {
+  string team_id = 1;
+  string user_id = 2;
+}
+
+message RemoveTeamMemberResponse {}

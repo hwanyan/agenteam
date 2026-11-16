@@ -30,13 +30,45 @@ var ErrAlreadyExists = errors.New("already exists")
 // （对应 mcp_tools 表 (team_id, base_url) 唯一约束）：一个团队下同一个 base_url 只能被引入一次。
 var ErrMcpToolBaseURLTaken = errors.New("mcp tool base_url already exists in team")
 
+// ErrLastOwner 表示该操作会让团队失去最后一个 owner（移除或降级最后一个 owner），被拒绝。
+var ErrLastOwner = errors.New("cannot remove or demote the last owner of the team")
+
+// MemberStore 是“团队成员 / 团队内角色 / 用户名镜像”相关能力，由 PostgreSQL 实现，
+// 同时嵌入 Store 与 TeamStore。
+//
+// 这里的角色是团队级角色（pb.TeamRole：owner / member），与 auth 服务写入 Access Token 的
+// 平台级角色（user / admin）无关。所有查询都会排除已软删除的团队。
+type MemberStore interface {
+	// ListTeamsByUser 返回用户所在的全部团队（按创建时间升序），每个团队的 MyRole 已按该用户填充。
+	ListTeamsByUser(ctx context.Context, userID string) ([]*pb.Team, error)
+	// GetMemberRole 返回用户在团队内的角色；团队不存在（含已删除）或用户不是成员返回 ErrNotFound。
+	GetMemberRole(ctx context.Context, teamID, userID string) (pb.TeamRole, error)
+	// ListTeamMembers 返回团队成员（owner 在前，其余按加入时间升序），Username 取自用户名镜像，可能为空。
+	ListTeamMembers(ctx context.Context, teamID string) ([]*pb.TeamMember, error)
+	// AddTeamMember 把用户加入团队；团队不存在返回 ErrNotFound，用户已是成员返回 ErrAlreadyExists。
+	AddTeamMember(ctx context.Context, teamID, userID string, role pb.TeamRole) error
+	// UpdateTeamMemberRole 修改成员角色；成员不存在返回 ErrNotFound，
+	// 会让团队失去最后一个 owner 时返回 ErrLastOwner（同一事务内加锁校验，并发安全）。
+	UpdateTeamMemberRole(ctx context.Context, teamID, userID string, role pb.TeamRole) error
+	// RemoveTeamMember 把成员移出团队；成员不存在返回 ErrNotFound，移除最后一个 owner 返回 ErrLastOwner。
+	RemoveTeamMember(ctx context.Context, teamID, userID string) error
+	// UpsertUserProfile 记录/刷新 user_id 与用户名的对应关系（auth 服务没有按用户名查询用户的接口）。
+	UpsertUserProfile(ctx context.Context, userID, username string) error
+	// FindUserIDByUsername 按用户名（不区分大小写）解析 user_id；没有登录记录返回 ErrNotFound。
+	FindUserIDByUsername(ctx context.Context, username string) (string, error)
+}
+
 // Store 是业务层依赖的统一存储接口。
 type Store interface {
-	// CreateTeam 原子性地创建团队（同时会自动创建其对应的主 Agent，两者互相引用，需保证一致性）。
-	CreateTeam(ctx context.Context, team *pb.Team, mainAgent *pb.Agent) error
+	MemberStore
+
+	// CreateTeam 原子性地创建团队（同时会自动创建其对应的主 Agent，并把 ownerUserID 记为该团队的 owner，
+	// 三者在同一事务内，互相引用，需保证一致性）。
+	CreateTeam(ctx context.Context, team *pb.Team, mainAgent *pb.Agent, ownerUserID string) error
 	// GetTeam 按 id 查询团队。
 	GetTeam(ctx context.Context, id string) (*pb.Team, error)
-	// ListTeams 返回全部团队，按创建时间升序排列。
+	// ListTeams 返回全部团队（不区分成员），按创建时间升序排列；仅供平台管理员使用，
+	// 普通用户应使用 ListTeamsByUser。
 	ListTeams(ctx context.Context) ([]*pb.Team, error)
 	// DeleteTeam 软删除团队及其全部 Agent、自定义 MCP 工具（单个 PG 事务，成功即对外不可见）。
 	// 聊天记录的软删除与运行态缓存卸载不在此同步完成，而是由后台清理 worker
@@ -81,7 +113,9 @@ type Store interface {
 
 // TeamStore 是 Store 中“团队 / Agent / 自定义 MCP 工具”相关能力的子接口，由 PostgreSQL 实现。
 type TeamStore interface {
-	CreateTeam(ctx context.Context, team *pb.Team, mainAgent *pb.Agent) error
+	MemberStore
+
+	CreateTeam(ctx context.Context, team *pb.Team, mainAgent *pb.Agent, ownerUserID string) error
 	GetTeam(ctx context.Context, id string) (*pb.Team, error)
 	ListTeams(ctx context.Context) ([]*pb.Team, error)
 	// SoftDeleteTeam 仅软删除关系型库中的团队与其 Agent（不涉及聊天记录），不存在或已删除返回 ErrNotFound。
@@ -127,8 +161,40 @@ func New(teams TeamStore, messages MessageStore) Store {
 	return &composite{teams: teams, messages: messages}
 }
 
-func (c *composite) CreateTeam(ctx context.Context, team *pb.Team, mainAgent *pb.Agent) error {
-	return c.teams.CreateTeam(ctx, team, mainAgent)
+func (c *composite) CreateTeam(ctx context.Context, team *pb.Team, mainAgent *pb.Agent, ownerUserID string) error {
+	return c.teams.CreateTeam(ctx, team, mainAgent, ownerUserID)
+}
+
+func (c *composite) ListTeamsByUser(ctx context.Context, userID string) ([]*pb.Team, error) {
+	return c.teams.ListTeamsByUser(ctx, userID)
+}
+
+func (c *composite) GetMemberRole(ctx context.Context, teamID, userID string) (pb.TeamRole, error) {
+	return c.teams.GetMemberRole(ctx, teamID, userID)
+}
+
+func (c *composite) ListTeamMembers(ctx context.Context, teamID string) ([]*pb.TeamMember, error) {
+	return c.teams.ListTeamMembers(ctx, teamID)
+}
+
+func (c *composite) AddTeamMember(ctx context.Context, teamID, userID string, role pb.TeamRole) error {
+	return c.teams.AddTeamMember(ctx, teamID, userID, role)
+}
+
+func (c *composite) UpdateTeamMemberRole(ctx context.Context, teamID, userID string, role pb.TeamRole) error {
+	return c.teams.UpdateTeamMemberRole(ctx, teamID, userID, role)
+}
+
+func (c *composite) RemoveTeamMember(ctx context.Context, teamID, userID string) error {
+	return c.teams.RemoveTeamMember(ctx, teamID, userID)
+}
+
+func (c *composite) UpsertUserProfile(ctx context.Context, userID, username string) error {
+	return c.teams.UpsertUserProfile(ctx, userID, username)
+}
+
+func (c *composite) FindUserIDByUsername(ctx context.Context, username string) (string, error) {
+	return c.teams.FindUserIDByUsername(ctx, username)
 }
 
 func (c *composite) GetTeam(ctx context.Context, id string) (*pb.Team, error) {

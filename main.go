@@ -19,6 +19,7 @@ import (
 	"github.com/hwanyan/agenteam/internal/cache"
 	"github.com/hwanyan/agenteam/internal/cleanup"
 	"github.com/hwanyan/agenteam/internal/config"
+	"github.com/hwanyan/agenteam/internal/grpcauth"
 	"github.com/hwanyan/agenteam/internal/httpauth"
 	"github.com/hwanyan/agenteam/internal/httpmiddleware"
 	"github.com/hwanyan/agenteam/internal/llm"
@@ -96,7 +97,13 @@ func main() {
 	agentSrv := service.NewAgentServer(deps)
 	workspaceSrv := service.NewWorkspaceServer(deps)
 
-	grpcServer := grpc.NewServer()
+	// gRPC 服务端自带 Bearer 鉴权：Workspace 走真实拨号转发，HTTP 中间件注入的用户身份不会跨越这次调用，
+	// 只有 authorization 头会作为 metadata 传过来，必须在这里重新校验并注入身份；
+	// 同时直连 gRPC 端口也无法绕过鉴权。
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(grpcauth.Unary(authClient)),
+		grpc.StreamInterceptor(grpcauth.Stream(authClient)),
+	)
 	agenteamv1.RegisterTeamServiceServer(grpcServer, teamSrv)
 	agenteamv1.RegisterAgentServiceServer(grpcServer, agentSrv)
 	agenteamv1.RegisterWorkspaceServiceServer(grpcServer, workspaceSrv)

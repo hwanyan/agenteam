@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/hwanyan/agenteam/internal/authclient"
+	"github.com/hwanyan/agenteam/internal/authctx"
 )
 
 // TokenVerifier 校验用户 JWT 的能力（由 hwan 认证服务提供，见 internal/authclient）
@@ -18,12 +19,9 @@ type TokenVerifier interface {
 	VerifyToken(ctx context.Context, token string) (*authclient.Identity, error)
 }
 
-type ctxKey struct{}
-
 // UserFromContext 取出鉴权中间件注入的当前用户。
 func UserFromContext(ctx context.Context) (*authclient.Identity, bool) {
-	u, ok := ctx.Value(ctxKey{}).(*authclient.Identity)
-	return u, ok && u != nil
+	return authctx.FromContext(ctx)
 }
 
 const (
@@ -48,7 +46,7 @@ func Auth(verifier TokenVerifier, next http.Handler) http.Handler {
 		identity, err := verifier.VerifyToken(r.Context(), token)
 		switch {
 		case err == nil:
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, identity)))
+			next.ServeHTTP(w, r.WithContext(authctx.WithIdentity(r.Context(), identity)))
 		case errors.Is(err, authclient.ErrForbidden):
 			writeJSON(w, http.StatusForbidden, forbiddenBody)
 		case errors.Is(err, authclient.ErrUnavailable):

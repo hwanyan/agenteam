@@ -7,6 +7,8 @@ BEGIN;
 
 -- agents.team_id / mcp_tools.team_id 的外键约束是建表时内联声明的，
 -- 随 DROP TABLE 自动一并删除，这里不需要单独 ALTER TABLE ... DROP CONSTRAINT。
+DROP TABLE IF EXISTS team_members;
+DROP TABLE IF EXISTS user_profiles;
 DROP TABLE IF EXISTS agents;
 DROP TABLE IF EXISTS teams;
 DROP TABLE IF EXISTS mcp_tools;

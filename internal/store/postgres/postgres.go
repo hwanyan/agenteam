@@ -111,8 +111,11 @@ func (s *Store) Close() {
 	s.pool.Close()
 }
 
-// CreateTeam 在同一事务内原子创建团队及其主 Agent。
-func (s *Store) CreateTeam(ctx context.Context, team *agenteamv1.Team, mainAgent *agenteamv1.Agent) error {
+// CreateTeam 在同一事务内原子创建团队、其主 Agent，并把 ownerUserID 记为团队 owner。
+func (s *Store) CreateTeam(ctx context.Context, team *agenteamv1.Team, mainAgent *agenteamv1.Agent, ownerUserID string) error {
+	if ownerUserID == "" {
+		return fmt.Errorf("postgres: create team: owner user id 不能为空")
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("postgres: begin tx: %w", err)
@@ -128,6 +131,13 @@ func (s *Store) CreateTeam(ctx context.Context, team *agenteamv1.Team, mainAgent
 
 	if err := insertAgent(ctx, tx, mainAgent); err != nil {
 		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO team_members (team_id, user_id, role, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $4)
+	`, team.Id, ownerUserID, roleOwner, team.CreatedAt); err != nil {
+		return fmt.Errorf("postgres: insert team owner: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

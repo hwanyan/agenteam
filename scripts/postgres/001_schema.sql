@@ -103,4 +103,34 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_mcp_tools_team_base_url
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_team_id ON mcp_tools (team_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_created_at ON mcp_tools (created_at);
 
+-- 团队成员及团队内角色。
+-- 这里的 role 是“团队级角色”（owner / member），只描述某个用户在某个团队内能做什么，由 agenteam 自己维护；
+-- 与 auth 服务写入 Access Token 的“平台级角色”（user / admin，用于标识平台管理员）是两套互不相干的概念。
+-- user_id 来自 auth 服务（Token 的 sub），不在本库建外键。
+-- 团队是软删除的（teams.deleted_at），成员记录随之保留、不会被 ON DELETE CASCADE 清理；
+-- 读取时一律与 teams 关联并过滤 deleted_at IS NULL。
+CREATE TABLE IF NOT EXISTS team_members (
+    team_id    TEXT   NOT NULL REFERENCES teams (id) ON DELETE CASCADE,
+    user_id    TEXT   NOT NULL,
+    role       TEXT   NOT NULL CHECK (role IN ('owner', 'member')),
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    PRIMARY KEY (team_id, user_id)
+);
+
+-- “我所在的团队”按 user_id 查询。
+CREATE INDEX IF NOT EXISTS idx_team_members_user_id ON team_members (user_id);
+
+-- 登录用户的最小镜像（user_id -> username）。auth 服务没有“按用户名查询用户”的接口，
+-- 邀请成员时只能依赖本表把用户名解析成 user_id；用户每次通过鉴权访问本服务时会（限频）刷新这一行，
+-- 因此被邀请的人必须至少登录过本平台一次。成员列表也据此展示用户名。
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id    TEXT PRIMARY KEY,
+    username   TEXT   NOT NULL,
+    updated_at BIGINT NOT NULL
+);
+
+-- 用户名不区分大小写查找。不设唯一约束：auth 侧若出现用户名被复用，不能让镜像写入因此失败。
+CREATE INDEX IF NOT EXISTS idx_user_profiles_username ON user_profiles (lower(username));
+
 COMMIT;

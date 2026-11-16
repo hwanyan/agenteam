@@ -8,8 +8,13 @@
 ```
 main.go                    启动入口：同时监听 gRPC(:9090) 与 HTTP 网关(:8080)
 internal/store              统一存储接口 Store，及跨库协调逻辑（如删团队时协调 Postgres/Mongo）
-internal/store/postgres      teams / agents 的 PostgreSQL 实现
+internal/store/postgres      teams / agents / mcp_tools / team_members 的 PostgreSQL 实现
 internal/store/mongostore    chat_messages 的 MongoDB 实现
+internal/authclient          hwan 认证服务 gRPC 客户端（本地验签 Access Token）
+internal/authctx             在 context 中携带当前用户身份（HTTP 中间件与 gRPC 拦截器共用）
+internal/httpmiddleware      HTTP 网关 Bearer 鉴权中间件
+internal/grpcauth            gRPC 服务端 Bearer 鉴权拦截器（Workspace 流式走拨号转发，需在此重新校验）
+internal/cleanup             团队软删除后的后台清理 worker
 internal/cache               Agent 运行态热缓存接口 + Redis 实现
 internal/runtime             Agent 运行态管理：配置校验、加载/重新加载、版本号（底层用 internal/cache）
 internal/llm                 LLM 客户端：client.go 为接口层（Client/ChatRequest/StreamChunk/New），
@@ -182,7 +187,38 @@ agenteam 本地**没有「已登出名单」**，也不为此依赖 Redis：已�
 | 取不到验签公钥（认证服务不可达且尚无缓存）；**调用方凭证被认证服务拒绝**（部署配置错误） | `503`（带 `Retry-After`；刻意不用 401，避免服务抖动或配置错误时把所有用户踢下线，配置错误会写 ERROR 日志） |
 
 认证服务客户端见 `internal/authclient`，鉴权中间件见 `internal/httpmiddleware`。
-gRPC 端口（默认 `127.0.0.1:9090`）本身不做鉴权，请保持仅监听 loopback。
+
+**gRPC 端口同样要求 Bearer 鉴权**（`internal/grpcauth` 拦截器）。原因：Workspace 含流式接口，HTTP 网关对它不能进程内直调，
+而是真实拨号到本地 gRPC 端口；HTTP 中间件放在请求 context 里的用户身份不会跨越这次调用，只有 `authorization` 头会作为 metadata 传过来，
+所以 gRPC 服务端自己重新本地验签并注入身份（`internal/authctx`）。这样直连 gRPC 端口也无法绕过鉴权，业务层不必相信“上游已经验过”。
+即便如此，仍建议端口只监听 loopback。
+
+### 授权：平台角色与团队角色（两套互不相干）
+
+| | 平台级角色 | 团队级角色 |
+| --- | --- | --- |
+| 取值 | `user` / `admin` | `owner` / `member` |
+| 回答的问题 | 这个人是不是整个 agenteam 平台的管理员 | 这个人在**某个团队**里能做什么 |
+| 存放 | hwan auth 的 `users.role`，随 Access Token 的 `roles` 声明下发（`Identity.Roles`） | agenteam 自己的 `team_members(team_id, user_id, role)` 表 |
+
+权限矩阵（非成员访问团队资源一律返回 `NotFound`，与资源不存在无法区分，不暴露团队 / Agent / 工具是否存在）：
+
+| 操作 | member | owner | 平台 admin |
+| --- | --- | --- | --- |
+| 查看团队 / Agent / MCP 工具 / 成员列表 / 聊天历史，在工作区对话 | ✅ | ✅ | ✅（越过成员校验，按 owner 对待） |
+| 创建 / 修改 / 删除 Agent 与 MCP 工具，管理成员（邀请 / 改角色 / 移除他人），删除团队 | ❌ `PermissionDenied` | ✅ | ✅ |
+| 移除自己（退出团队） | ✅ | ✅（团队至少保留一名 owner） | — |
+| `ListTeams` | 只返回我所在的团队 | 同左 | 同左；`all=true` 可返回全部团队（非管理员传 `all=true` 得到 `PermissionDenied`） |
+
+- 创建团队时，创建者在同一事务内被记为该团队的 `owner`；团队至少保留一名 owner（并发互相降级 / 移除也安全，见 `store/postgres/member.go`）。
+- **邀请成员**按**用户名**指定（`POST /v1/teams/{team_id}/members`），直接加入、无需对方确认。auth 服务没有“按用户名查用户”的接口，
+  agenteam 在用户每次通过鉴权访问时（限频）把 `user_id → username` 记入 `user_profiles` 镜像，邀请靠它解析；因此**被邀请的人必须至少登录并访问过本平台一次**。
+- 成员管理接口：`GET/POST /v1/teams/{team_id}/members`、`PUT/DELETE /v1/teams/{team_id}/members/{user_id}`。
+- 授权实现集中在 `internal/service/authz.go`；响应里 `Team.my_role` 给出当前用户在该团队的角色，前端据此决定是否展示编辑入口。
+
+> **升级存量环境：** 升级前创建的团队没有任何成员，授权上线后将无人可访问。请先执行
+> `psql ... -v owner_user_id=<user_id> -f scripts/postgres/20261112_team_members.sql`，
+> 把所有尚无成员的团队统一指定给该用户（auth 中的 user id，即 Token 的 `sub`）作为 owner；脚本幂等，缺少参数会报错退出。
 
 > **待办：服务间通道加固。** 当前是「静态服务凭证 + 明文 gRPC」，仅适合同一内网。后续应升级为 mTLS（或至少为 auth 的 gRPC 端口启用 TLS），避免调用方凭证被窃听。详见 `hwan/app/auth/README.md`。
 
@@ -206,9 +242,7 @@ gRPC 端口（默认 `127.0.0.1:9090`）本身不做鉴权，请保持仅监听 
   仍在使用的扁平 `"kind"` 判别字段风格，但尚未实现 `tasks/*`（长任务轮询/取消）
   等 A2A 规范中的其他方法；鉴权也只支持 Bearer Token，尚未支持 OAuth2/mTLS 等
   A2A SecurityScheme 的其他方案。
-- `DeleteTeam` 跨 PostgreSQL / MongoDB 两个数据库操作，非分布式事务，
-  采用“先删关系型主数据、再清理聊天记录”的最终一致性策略：极端情况下
-  可能残留孤立的聊天记录，但不影响团队/Agent 数据一致性。
-- 已接入 hwan 用户系统做**登录态鉴权**，但尚未做**数据归属隔离**：teams / agents 表还没有 owner（user_id）字段，
-  `internal/service` 中的 handler 虽能通过 `UserFromContext` 拿到当前用户，目前仍对所有已认证用户一视同仁。
-  如需多租户隔离，需要后续为表加 owner 并在各 handler 中按用户过滤。
+- `DeleteTeam` 软删除团队及其 Agent / MCP 工具（PG 单事务，成功即对外不可见），聊天记录软删除与 Agent 运行态缓存卸载
+  由后台清理 worker（`internal/cleanup`）异步完成并自动重试，最终一致；软删除的数据目前不会被物理清理。
+- 数据归属隔离已通过 `team_members` 团队成员体系实现（见上文“授权”）。目前的取舍：邀请成员直接加入、无需对方确认；
+  “我所在的团队”之外没有更细的资源级权限（同一团队内 owner / member 两档）。

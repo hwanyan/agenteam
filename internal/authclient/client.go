@@ -52,7 +52,7 @@ var (
 type Identity struct {
 	UserID   string
 	Username string
-	Roles    []string // 平台级角色（user / admin）；团队内角色（owner / member 等）由 agenteam 自己的库维护
+	Roles    []string // 平台级角色（user / admin）
 }
 
 // HasRole 是否拥有指定的平台级角色

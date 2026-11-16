@@ -43,8 +43,11 @@ func NewWorkspaceServer(deps *Deps) *WorkspaceServer {
 	return &WorkspaceServer{Deps: deps}
 }
 
-// SendMessage 向团队的主 Agent 发送一条消息并返回其回复。
+// SendMessage 向团队的主 Agent 发送一条消息并返回其回复；团队成员（member / owner）均可对话。
 func (s *WorkspaceServer) SendMessage(ctx context.Context, req *agenteamv1.SendMessageRequest) (*agenteamv1.SendMessageResponse, error) {
+	if _, _, err := s.authorizeTeam(ctx, req.TeamId, agenteamv1.TeamRole_TEAM_ROLE_MEMBER); err != nil {
+		return nil, err
+	}
 	content := strings.TrimSpace(req.Content)
 	if content == "" {
 		return nil, status.Error(codes.InvalidArgument, "消息内容不能为空")
@@ -171,6 +174,9 @@ func (s *WorkspaceServer) replyFor(ctx context.Context, agent *agenteamv1.Agent,
 // 历史记录不一致，随后再把错误返回给 gRPC 层（HTTP 网关会以 trailer 形式携带）。
 func (s *WorkspaceServer) SendMessageStream(req *agenteamv1.SendMessageRequest, stream agenteamv1.WorkspaceService_SendMessageStreamServer) error {
 	ctx := stream.Context()
+	if _, _, err := s.authorizeTeam(ctx, req.TeamId, agenteamv1.TeamRole_TEAM_ROLE_MEMBER); err != nil {
+		return err
+	}
 
 	content := strings.TrimSpace(req.Content)
 	if content == "" {
@@ -429,8 +435,8 @@ func (s *WorkspaceServer) streamA2AReply(ctx context.Context, rec *streamRecorde
 
 // ListMessages 返回团队的历史聊天记录。
 func (s *WorkspaceServer) ListMessages(ctx context.Context, req *agenteamv1.ListMessagesRequest) (*agenteamv1.ListMessagesResponse, error) {
-	if _, err := s.Store.GetTeam(ctx, req.TeamId); err != nil {
-		return nil, teamNotFoundOrErr(err)
+	if _, _, err := s.authorizeTeam(ctx, req.TeamId, agenteamv1.TeamRole_TEAM_ROLE_MEMBER); err != nil {
+		return nil, err
 	}
 	msgs, err := s.Store.ListMessages(ctx, req.TeamId)
 	if err != nil {

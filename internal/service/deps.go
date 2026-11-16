@@ -14,4 +14,7 @@ type Deps struct {
 	Runtime *runtime.Manager
 	LLM     llm.Client
 	A2A     *a2a.Client
+
+	// profiles 记录用户名镜像的刷新节流状态（零值可用），见 authz.go 的 currentUser。
+	profiles profileSync
 }

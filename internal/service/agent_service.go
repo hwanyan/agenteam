@@ -27,19 +27,19 @@ func NewAgentServer(deps *Deps) *AgentServer {
 	return &AgentServer{Deps: deps}
 }
 
-// GetAgent 按 id 查询 Agent。
+// GetAgent 按 id 查询 Agent（所属团队的成员可见）。
 func (s *AgentServer) GetAgent(ctx context.Context, req *agenteamv1.GetAgentRequest) (*agenteamv1.GetAgentResponse, error) {
-	agent, err := s.Store.GetAgent(ctx, req.Id)
+	agent, err := s.authorizeAgent(ctx, req.Id, agenteamv1.TeamRole_TEAM_ROLE_MEMBER)
 	if err != nil {
-		return nil, agentNotFoundOrErr(err)
+		return nil, err
 	}
 	return &agenteamv1.GetAgentResponse{Agent: redactAgent(agent)}, nil
 }
 
-// ListAgents 返回指定团队下的全部 Agent（含主 Agent）。
+// ListAgents 返回指定团队下的全部 Agent（含主 Agent）；团队成员可见。
 func (s *AgentServer) ListAgents(ctx context.Context, req *agenteamv1.ListAgentsRequest) (*agenteamv1.ListAgentsResponse, error) {
-	if _, err := s.Store.GetTeam(ctx, req.TeamId); err != nil {
-		return nil, teamNotFoundOrErr(err)
+	if _, _, err := s.authorizeTeam(ctx, req.TeamId, agenteamv1.TeamRole_TEAM_ROLE_MEMBER); err != nil {
+		return nil, err
 	}
 	agents, err := s.Store.ListAgentsByTeam(ctx, req.TeamId)
 	if err != nil {
@@ -51,14 +51,14 @@ func (s *AgentServer) ListAgents(ctx context.Context, req *agenteamv1.ListAgents
 	return &agenteamv1.ListAgentsResponse{Agents: agents}, nil
 }
 
-// CreateAgent 在指定团队下创建一个新的非主 Agent，并触发服务端加载。
+// CreateAgent 在指定团队下创建一个新的非主 Agent，并触发服务端加载；仅团队 owner 可操作。
 // 根据 req.Kind 支持两种创建方式：
 //   - AGENT_KIND_PROMPT（默认，未指定 kind 时的兼容行为）：本地 Prompt + LLM 驱动。
 //   - AGENT_KIND_A2A：通过 A2A 协议链接一个外部 Agent 提供方，仅需 name + a2a_config.endpoint_url，
 //     prompt/model/mcp_tools/skills 对该方式无效。
 func (s *AgentServer) CreateAgent(ctx context.Context, req *agenteamv1.CreateAgentRequest) (*agenteamv1.CreateAgentResponse, error) {
-	if _, err := s.Store.GetTeam(ctx, req.TeamId); err != nil {
-		return nil, teamNotFoundOrErr(err)
+	if _, _, err := s.authorizeTeam(ctx, req.TeamId, agenteamv1.TeamRole_TEAM_ROLE_OWNER); err != nil {
+		return nil, err
 	}
 	if req.Name == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent 名称不能为空")
@@ -119,8 +119,11 @@ func (s *AgentServer) CreateAgent(ctx context.Context, req *agenteamv1.CreateAge
 }
 
 // DiscoverA2AAgent 探测一个 A2A 外部 Agent：发起 Agent Card 发现请求并返回展示信息，
-// 不产生任何持久化副作用，供前端在创建/保存 A2A Agent 前先行校验连通性。
+// 不产生任何持久化副作用，供前端在创建/保存 A2A Agent 前先行校验连通性。需要登录，不要求属于某个团队。
 func (s *AgentServer) DiscoverA2AAgent(ctx context.Context, req *agenteamv1.DiscoverA2AAgentRequest) (*agenteamv1.DiscoverA2AAgentResponse, error) {
+	if _, err := s.currentUser(ctx); err != nil {
+		return nil, err
+	}
 	if req.EndpointUrl == "" {
 		return nil, status.Error(codes.InvalidArgument, "endpoint_url 不能为空")
 	}
@@ -156,9 +159,9 @@ func (s *AgentServer) DiscoverA2AAgent(ctx context.Context, req *agenteamv1.Disc
 //     表示“不修改现有凭证”（沿用已保存的 auth_token），非空则覆盖，避免前端每次
 //     保存都必须回传明文凭证。
 func (s *AgentServer) UpdateAgent(ctx context.Context, req *agenteamv1.UpdateAgentRequest) (*agenteamv1.UpdateAgentResponse, error) {
-	agent, err := s.Store.GetAgent(ctx, req.Id)
+	agent, err := s.authorizeAgent(ctx, req.Id, agenteamv1.TeamRole_TEAM_ROLE_OWNER)
 	if err != nil {
-		return nil, agentNotFoundOrErr(err)
+		return nil, err
 	}
 
 	if req.Name == "" {
@@ -216,8 +219,11 @@ func (s *AgentServer) UpdateAgent(ctx context.Context, req *agenteamv1.UpdateAge
 
 // DeleteAgent 删除一个非主 Agent，并清理其运行态缓存。
 // 主 Agent 与所属团队生命周期绑定，不允许通过本接口删除（返回 InvalidArgument），
-// 只能随团队一起被 DeleteTeam 删除。
+// 只能随团队一起被 DeleteTeam 删除。仅团队 owner 可操作。
 func (s *AgentServer) DeleteAgent(ctx context.Context, req *agenteamv1.DeleteAgentRequest) (*agenteamv1.DeleteAgentResponse, error) {
+	if _, err := s.authorizeAgent(ctx, req.Id, agenteamv1.TeamRole_TEAM_ROLE_OWNER); err != nil {
+		return nil, err
+	}
 	if err := s.Store.DeleteAgent(ctx, req.Id); err != nil {
 		if errors.Is(err, store.ErrMainAgentProtected) {
 			return nil, status.Error(codes.InvalidArgument, "主 Agent 不能被删除")
@@ -246,10 +252,13 @@ func (s *AgentServer) ListModelOptions(_ context.Context, _ *agenteamv1.ListMode
 func (s *AgentServer) ListMcpToolOptions(ctx context.Context, req *agenteamv1.ListMcpToolOptionsRequest) (*agenteamv1.ListMcpToolOptionsResponse, error) {
 	merged := append([]*agenteamv1.ToolOption{}, options.MCPTools()...)
 	if req.TeamId == "" {
+		if _, err := s.currentUser(ctx); err != nil {
+			return nil, err
+		}
 		return &agenteamv1.ListMcpToolOptionsResponse{Tools: merged}, nil
 	}
-	if _, err := s.Store.GetTeam(ctx, req.TeamId); err != nil {
-		return nil, teamNotFoundOrErr(err)
+	if _, _, err := s.authorizeTeam(ctx, req.TeamId, agenteamv1.TeamRole_TEAM_ROLE_MEMBER); err != nil {
+		return nil, err
 	}
 	custom, err := s.Store.ListMcpToolsByTeam(ctx, req.TeamId)
 	if err != nil {
@@ -281,8 +290,8 @@ func (s *AgentServer) CreateMcpTool(ctx context.Context, req *agenteamv1.CreateM
 	if req.TeamId == "" {
 		return nil, status.Error(codes.InvalidArgument, "team_id 不能为空")
 	}
-	if _, err := s.Store.GetTeam(ctx, req.TeamId); err != nil {
-		return nil, teamNotFoundOrErr(err)
+	if _, _, err := s.authorizeTeam(ctx, req.TeamId, agenteamv1.TeamRole_TEAM_ROLE_OWNER); err != nil {
+		return nil, err
 	}
 	// 首尾空白不参与比较：避免 " https://a/mcp" 与 "https://a/mcp" 绕过 (team_id, base_url) 唯一约束。
 	name := strings.TrimSpace(req.Name)
@@ -333,23 +342,23 @@ func (s *AgentServer) CreateMcpTool(ctx context.Context, req *agenteamv1.CreateM
 	return &agenteamv1.CreateMcpToolResponse{Tool: tool}, nil
 }
 
-// GetMcpTool 按 id 查询单个自定义 MCP 工具的详情，供前端编辑表单回填；
+// GetMcpTool 按 id 查询单个自定义 MCP 工具的详情，供前端编辑表单回填（所属团队的成员可见）；
 // api_key 不会在响应中回显明文，只反映 ApiKeySet 标记。
 func (s *AgentServer) GetMcpTool(ctx context.Context, req *agenteamv1.GetMcpToolRequest) (*agenteamv1.GetMcpToolResponse, error) {
-	tool, _, err := s.Store.GetMcpTool(ctx, req.Id)
+	tool, err := s.authorizeMcpTool(ctx, req.Id, agenteamv1.TeamRole_TEAM_ROLE_MEMBER)
 	if err != nil {
-		return nil, mcpToolNotFoundOrErr(err)
+		return nil, err
 	}
 	return &agenteamv1.GetMcpToolResponse{Tool: tool}, nil
 }
 
-// UpdateMcpTool 更新一个自定义 MCP 工具的配置信息（名称/base_url/密钥/超时时间）；
+// UpdateMcpTool 更新一个自定义 MCP 工具的配置信息（名称/base_url/密钥/超时时间）；仅团队 owner 可操作。
 // 工具的归属团队（team_id）创建后不可变更。api_key 为空表示"不修改现有密钥"（沿用
 // 已保存的值），非空则覆盖，避免前端每次保存都必须回传明文密钥。
 func (s *AgentServer) UpdateMcpTool(ctx context.Context, req *agenteamv1.UpdateMcpToolRequest) (*agenteamv1.UpdateMcpToolResponse, error) {
-	existing, _, err := s.Store.GetMcpTool(ctx, req.Id)
+	existing, err := s.authorizeMcpTool(ctx, req.Id, agenteamv1.TeamRole_TEAM_ROLE_OWNER)
 	if err != nil {
-		return nil, mcpToolNotFoundOrErr(err)
+		return nil, err
 	}
 	name := strings.TrimSpace(req.Name)
 	baseURL := strings.TrimSpace(req.BaseUrl)
@@ -393,8 +402,11 @@ func (s *AgentServer) UpdateMcpTool(ctx context.Context, req *agenteamv1.UpdateM
 // DeleteMcpTool 删除一个自定义 MCP 工具，并同步清理所属团队下所有 Agent 对它的绑定引用
 // （存储层同一事务内完成），随后刷新这些 Agent 的运行态缓存快照。
 // 清理引用是必须的：agents.mcp_tools 只存 id、没有外键，否则 Agent 配置里会残留已不存在的
-// 工具 id，并继续出现在对话的 system prompt 里。
+// 工具 id，并继续出现在对话的 system prompt 里。仅团队 owner 可操作。
 func (s *AgentServer) DeleteMcpTool(ctx context.Context, req *agenteamv1.DeleteMcpToolRequest) (*agenteamv1.DeleteMcpToolResponse, error) {
+	if _, err := s.authorizeMcpTool(ctx, req.Id, agenteamv1.TeamRole_TEAM_ROLE_OWNER); err != nil {
+		return nil, err
+	}
 	affected, err := s.Store.DeleteMcpTool(ctx, req.Id)
 	if err != nil {
 		return nil, mcpToolNotFoundOrErr(err)

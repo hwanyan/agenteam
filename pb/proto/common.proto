@@ -27,6 +27,15 @@ enum MessageRole {
   MESSAGE_ROLE_SYSTEM = 3;
 }
 
+// 用户在某个团队内的角色（团队级角色，存放在 agenteam 自己的 team_members 表）。
+// 与 auth 服务写入 Access Token 的“平台级角色”（user / admin）是两套互不相干的概念：
+// 平台角色回答“这个人是不是整个平台的管理员”，团队角色回答“这个人在这个团队里能做什么”。
+enum TeamRole {
+  TEAM_ROLE_UNSPECIFIED = 0;
+  TEAM_ROLE_OWNER = 1;  // 团队所有者：管理成员、增删改 Agent / MCP 工具、删除团队
+  TEAM_ROLE_MEMBER = 2; // 普通成员：只读，并可在工作区对话
+}
+
 // A2A（Agent2Agent）协议接入配置：把一个符合 A2A 协议的外部 Agent 接入为平台内的一个 Agent。
 // 接入时后端会向 endpoint_url 发起 Agent Card 发现请求（GET {endpoint_url}/.well-known/agent-card.json），
 // 校验对端可达并回填 remote_* 只读字段，供前端展示对端的真实能力。
@@ -75,6 +84,8 @@ message Team {
   string main_agent_id = 3;
   int64 created_at = 4;
   int64 updated_at = 5;
+  // 只读：当前请求用户在该团队内的有效角色。平台管理员（auth 的 admin）越过成员校验访问时视为 OWNER。
+  TeamRole my_role = 6;
 }
 
 // 一次工具调用的展示信息，用于在工作区回复下方展示"这条回复过程中调用了哪个工具"。

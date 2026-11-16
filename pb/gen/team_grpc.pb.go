@@ -19,23 +19,43 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TeamService_CreateTeam_FullMethodName = "/agenteam.v1.TeamService/CreateTeam"
-	TeamService_ListTeams_FullMethodName  = "/agenteam.v1.TeamService/ListTeams"
-	TeamService_GetTeam_FullMethodName    = "/agenteam.v1.TeamService/GetTeam"
-	TeamService_DeleteTeam_FullMethodName = "/agenteam.v1.TeamService/DeleteTeam"
+	TeamService_CreateTeam_FullMethodName           = "/agenteam.v1.TeamService/CreateTeam"
+	TeamService_ListTeams_FullMethodName            = "/agenteam.v1.TeamService/ListTeams"
+	TeamService_GetTeam_FullMethodName              = "/agenteam.v1.TeamService/GetTeam"
+	TeamService_DeleteTeam_FullMethodName           = "/agenteam.v1.TeamService/DeleteTeam"
+	TeamService_ListTeamMembers_FullMethodName      = "/agenteam.v1.TeamService/ListTeamMembers"
+	TeamService_AddTeamMember_FullMethodName        = "/agenteam.v1.TeamService/AddTeamMember"
+	TeamService_UpdateTeamMemberRole_FullMethodName = "/agenteam.v1.TeamService/UpdateTeamMemberRole"
+	TeamService_RemoveTeamMember_FullMethodName     = "/agenteam.v1.TeamService/RemoveTeamMember"
 )
 
 // TeamServiceClient is the client API for TeamService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// TeamService 负责团队的创建、查询与删除。
-// 创建团队时会自动创建团队的主 Agent。
+// TeamService 负责团队的创建、查询与删除，以及团队成员管理。
+// 创建团队时会自动创建团队的主 Agent，并把创建者设为该团队的 owner。
+//
+// 授权规则（团队级角色见 TeamRole，平台管理员 admin 可越过成员校验）：
+//   - 非成员访问团队资源一律按“不存在”处理（NotFound），不暴露团队是否存在；
+//   - 成员（member）：只读，并可在工作区对话；
+//   - 所有者（owner）：增删改 Agent / MCP 工具、管理成员、删除团队。
 type TeamServiceClient interface {
 	CreateTeam(ctx context.Context, in *CreateTeamRequest, opts ...grpc.CallOption) (*CreateTeamResponse, error)
+	// ListTeams 默认只返回当前用户所在的团队；all=true 仅平台管理员可用，返回全部团队。
 	ListTeams(ctx context.Context, in *ListTeamsRequest, opts ...grpc.CallOption) (*ListTeamsResponse, error)
 	GetTeam(ctx context.Context, in *GetTeamRequest, opts ...grpc.CallOption) (*GetTeamResponse, error)
 	DeleteTeam(ctx context.Context, in *DeleteTeamRequest, opts ...grpc.CallOption) (*DeleteTeamResponse, error)
+	// ListTeamMembers 返回团队成员列表（owner 在前，其余按加入时间升序）。团队成员可见。
+	ListTeamMembers(ctx context.Context, in *ListTeamMembersRequest, opts ...grpc.CallOption) (*ListTeamMembersResponse, error)
+	// AddTeamMember 邀请用户加入团队（直接加入，无需对方确认）。仅 owner 可用。
+	// 被邀请人按用户名指定，且必须已登录过本平台（本平台据此才能把用户名对应到用户 id）。
+	AddTeamMember(ctx context.Context, in *AddTeamMemberRequest, opts ...grpc.CallOption) (*AddTeamMemberResponse, error)
+	// UpdateTeamMemberRole 修改成员角色。仅 owner 可用；不允许把团队最后一个 owner 降级。
+	UpdateTeamMemberRole(ctx context.Context, in *UpdateTeamMemberRoleRequest, opts ...grpc.CallOption) (*UpdateTeamMemberRoleResponse, error)
+	// RemoveTeamMember 移除成员。owner 可移除任何人；任何成员都可以移除自己（退出团队）。
+	// 不允许移除团队最后一个 owner。
+	RemoveTeamMember(ctx context.Context, in *RemoveTeamMemberRequest, opts ...grpc.CallOption) (*RemoveTeamMemberResponse, error)
 }
 
 type teamServiceClient struct {
@@ -86,17 +106,73 @@ func (c *teamServiceClient) DeleteTeam(ctx context.Context, in *DeleteTeamReques
 	return out, nil
 }
 
+func (c *teamServiceClient) ListTeamMembers(ctx context.Context, in *ListTeamMembersRequest, opts ...grpc.CallOption) (*ListTeamMembersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTeamMembersResponse)
+	err := c.cc.Invoke(ctx, TeamService_ListTeamMembers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *teamServiceClient) AddTeamMember(ctx context.Context, in *AddTeamMemberRequest, opts ...grpc.CallOption) (*AddTeamMemberResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddTeamMemberResponse)
+	err := c.cc.Invoke(ctx, TeamService_AddTeamMember_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *teamServiceClient) UpdateTeamMemberRole(ctx context.Context, in *UpdateTeamMemberRoleRequest, opts ...grpc.CallOption) (*UpdateTeamMemberRoleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateTeamMemberRoleResponse)
+	err := c.cc.Invoke(ctx, TeamService_UpdateTeamMemberRole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *teamServiceClient) RemoveTeamMember(ctx context.Context, in *RemoveTeamMemberRequest, opts ...grpc.CallOption) (*RemoveTeamMemberResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveTeamMemberResponse)
+	err := c.cc.Invoke(ctx, TeamService_RemoveTeamMember_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TeamServiceServer is the server API for TeamService service.
 // All implementations must embed UnimplementedTeamServiceServer
 // for forward compatibility.
 //
-// TeamService 负责团队的创建、查询与删除。
-// 创建团队时会自动创建团队的主 Agent。
+// TeamService 负责团队的创建、查询与删除，以及团队成员管理。
+// 创建团队时会自动创建团队的主 Agent，并把创建者设为该团队的 owner。
+//
+// 授权规则（团队级角色见 TeamRole，平台管理员 admin 可越过成员校验）：
+//   - 非成员访问团队资源一律按“不存在”处理（NotFound），不暴露团队是否存在；
+//   - 成员（member）：只读，并可在工作区对话；
+//   - 所有者（owner）：增删改 Agent / MCP 工具、管理成员、删除团队。
 type TeamServiceServer interface {
 	CreateTeam(context.Context, *CreateTeamRequest) (*CreateTeamResponse, error)
+	// ListTeams 默认只返回当前用户所在的团队；all=true 仅平台管理员可用，返回全部团队。
 	ListTeams(context.Context, *ListTeamsRequest) (*ListTeamsResponse, error)
 	GetTeam(context.Context, *GetTeamRequest) (*GetTeamResponse, error)
 	DeleteTeam(context.Context, *DeleteTeamRequest) (*DeleteTeamResponse, error)
+	// ListTeamMembers 返回团队成员列表（owner 在前，其余按加入时间升序）。团队成员可见。
+	ListTeamMembers(context.Context, *ListTeamMembersRequest) (*ListTeamMembersResponse, error)
+	// AddTeamMember 邀请用户加入团队（直接加入，无需对方确认）。仅 owner 可用。
+	// 被邀请人按用户名指定，且必须已登录过本平台（本平台据此才能把用户名对应到用户 id）。
+	AddTeamMember(context.Context, *AddTeamMemberRequest) (*AddTeamMemberResponse, error)
+	// UpdateTeamMemberRole 修改成员角色。仅 owner 可用；不允许把团队最后一个 owner 降级。
+	UpdateTeamMemberRole(context.Context, *UpdateTeamMemberRoleRequest) (*UpdateTeamMemberRoleResponse, error)
+	// RemoveTeamMember 移除成员。owner 可移除任何人；任何成员都可以移除自己（退出团队）。
+	// 不允许移除团队最后一个 owner。
+	RemoveTeamMember(context.Context, *RemoveTeamMemberRequest) (*RemoveTeamMemberResponse, error)
 	mustEmbedUnimplementedTeamServiceServer()
 }
 
@@ -118,6 +194,18 @@ func (UnimplementedTeamServiceServer) GetTeam(context.Context, *GetTeamRequest) 
 }
 func (UnimplementedTeamServiceServer) DeleteTeam(context.Context, *DeleteTeamRequest) (*DeleteTeamResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteTeam not implemented")
+}
+func (UnimplementedTeamServiceServer) ListTeamMembers(context.Context, *ListTeamMembersRequest) (*ListTeamMembersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTeamMembers not implemented")
+}
+func (UnimplementedTeamServiceServer) AddTeamMember(context.Context, *AddTeamMemberRequest) (*AddTeamMemberResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddTeamMember not implemented")
+}
+func (UnimplementedTeamServiceServer) UpdateTeamMemberRole(context.Context, *UpdateTeamMemberRoleRequest) (*UpdateTeamMemberRoleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTeamMemberRole not implemented")
+}
+func (UnimplementedTeamServiceServer) RemoveTeamMember(context.Context, *RemoveTeamMemberRequest) (*RemoveTeamMemberResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveTeamMember not implemented")
 }
 func (UnimplementedTeamServiceServer) mustEmbedUnimplementedTeamServiceServer() {}
 func (UnimplementedTeamServiceServer) testEmbeddedByValue()                     {}
@@ -212,6 +300,78 @@ func _TeamService_DeleteTeam_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TeamService_ListTeamMembers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTeamMembersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TeamServiceServer).ListTeamMembers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TeamService_ListTeamMembers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TeamServiceServer).ListTeamMembers(ctx, req.(*ListTeamMembersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TeamService_AddTeamMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddTeamMemberRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TeamServiceServer).AddTeamMember(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TeamService_AddTeamMember_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TeamServiceServer).AddTeamMember(ctx, req.(*AddTeamMemberRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TeamService_UpdateTeamMemberRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTeamMemberRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TeamServiceServer).UpdateTeamMemberRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TeamService_UpdateTeamMemberRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TeamServiceServer).UpdateTeamMemberRole(ctx, req.(*UpdateTeamMemberRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TeamService_RemoveTeamMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveTeamMemberRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TeamServiceServer).RemoveTeamMember(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TeamService_RemoveTeamMember_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TeamServiceServer).RemoveTeamMember(ctx, req.(*RemoveTeamMemberRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TeamService_ServiceDesc is the grpc.ServiceDesc for TeamService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -234,6 +394,22 @@ var TeamService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteTeam",
 			Handler:    _TeamService_DeleteTeam_Handler,
+		},
+		{
+			MethodName: "ListTeamMembers",
+			Handler:    _TeamService_ListTeamMembers_Handler,
+		},
+		{
+			MethodName: "AddTeamMember",
+			Handler:    _TeamService_AddTeamMember_Handler,
+		},
+		{
+			MethodName: "UpdateTeamMemberRole",
+			Handler:    _TeamService_UpdateTeamMemberRole_Handler,
+		},
+		{
+			MethodName: "RemoveTeamMember",
+			Handler:    _TeamService_RemoveTeamMember_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
